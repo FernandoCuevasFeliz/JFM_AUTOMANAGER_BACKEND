@@ -76,3 +76,20 @@ export class SalePriceBelowDepositError extends BusinessRuleError {
     );
   }
 }
+
+/**
+ * El pago llega en una moneda distinta a la de la venta.
+ *
+ * `sale_payments` guarda `currency_id` pero no una tasa propia, asi que sumar
+ * un abono en dolares con uno en pesos daria un saldo sin sentido. La regla es
+ * que el abono se registra en la moneda de la venta: si el cliente paga en otra
+ * divisa, la conversion la hace la caja al recibir, no el sistema al sumar.
+ */
+export class PaymentCurrencyMismatchError extends BusinessRuleError {
+  constructor(saleCurrencyCode: string) {
+    super(
+      `El pago debe registrarse en la moneda de la venta (${saleCurrencyCode})`,
+      { expectedCurrency: saleCurrencyCode },
+    );
+  }
+}

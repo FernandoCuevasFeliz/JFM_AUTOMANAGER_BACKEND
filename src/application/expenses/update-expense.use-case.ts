@@ -1,5 +1,9 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
-import { CurrencyNotFoundError, PaymentMethodNotFoundError } from '../../domain/catalogs/catalog.errors';
+import {
+  CurrencyNotFoundError,
+  InconsistentExchangeRateError,
+  PaymentMethodNotFoundError,
+} from '../../domain/catalogs/catalog.errors';
 import { type Expense, isExpenseScopeConsistent } from '../../domain/expenses/expense.entity';
 import {
   ExpenseCategoryNotFoundError,
@@ -8,6 +12,7 @@ import {
 } from '../../domain/expenses/expense.errors';
 import type { ExpenseRepository } from '../../domain/expenses/expense.repository';
 import type { DomainError } from '../../domain/shared/domain-error';
+import { isExchangeRateConsistent } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import { VehicleNotFoundError } from '../../domain/vehicles/vehicle.errors';
 import type { VehicleRepository } from '../../domain/vehicles/vehicle.repository';
@@ -21,6 +26,7 @@ export interface UpdateExpenseInput {
   readonly paymentMethodId?: string;
   readonly description?: string;
   readonly amount?: number;
+  readonly exchangeRate?: number;
   readonly expenseDate?: string;
 }
 
@@ -57,11 +63,19 @@ export class UpdateExpenseUseCase implements UseCase<UpdateExpenseInput, Expense
       return err(new VehicleNotFoundError(input.vehicleId));
     }
 
-    if (
-      input.currencyId !== undefined &&
-      (await this.catalog.findCurrencyById(input.currencyId)) === null
-    ) {
-      return err(new CurrencyNotFoundError(input.currencyId));
+    // La coherencia moneda/tasa se comprueba sobre el estado RESULTANTE: puede
+    // cambiar solo la moneda, solo la tasa, o ambas.
+    if (input.currencyId !== undefined || input.exchangeRate !== undefined) {
+      const currencyId = input.currencyId ?? existing.currencyId;
+      const exchangeRate = input.exchangeRate ?? existing.exchangeRate;
+
+      const currency = await this.catalog.findCurrencyById(currencyId);
+      if (currency === null) {
+        return err(new CurrencyNotFoundError(currencyId));
+      }
+      if (!isExchangeRateConsistent(currency.code, exchangeRate)) {
+        return err(new InconsistentExchangeRateError(currency.code, exchangeRate));
+      }
     }
 
     if (
@@ -78,6 +92,7 @@ export class UpdateExpenseUseCase implements UseCase<UpdateExpenseInput, Expense
       ...(input.paymentMethodId !== undefined ? { paymentMethodId: input.paymentMethodId } : {}),
       ...(input.description !== undefined ? { description: input.description.trim() } : {}),
       ...(input.amount !== undefined ? { amount: input.amount } : {}),
+      ...(input.exchangeRate !== undefined ? { exchangeRate: input.exchangeRate } : {}),
       ...(input.expenseDate !== undefined ? { expenseDate: input.expenseDate } : {}),
     });
 

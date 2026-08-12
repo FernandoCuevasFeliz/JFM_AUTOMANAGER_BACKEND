@@ -1,5 +1,9 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
-import { CurrencyNotFoundError, PaymentMethodNotFoundError } from '../../domain/catalogs/catalog.errors';
+import {
+  CurrencyNotFoundError,
+  InconsistentExchangeRateError,
+  PaymentMethodNotFoundError,
+} from '../../domain/catalogs/catalog.errors';
 import { ClientNotFoundError, InactiveClientError } from '../../domain/clients/client.errors';
 import type { ClientRepository } from '../../domain/clients/client.repository';
 import { isConvertible } from '../../domain/quotations/quotation.entity';
@@ -23,6 +27,7 @@ import {
 import type { SaleRepository } from '../../domain/sales/sale.repository';
 import type { Clock } from '../../domain/shared/clock';
 import type { DomainError } from '../../domain/shared/domain-error';
+import { isExchangeRateConsistent } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import type { UnitOfWork } from '../../domain/shared/unit-of-work';
 import { isSellable } from '../../domain/vehicles/vehicle.entity';
@@ -62,7 +67,8 @@ export interface CreateSaleInput extends ActorInput {
  * transaccion:
  *
  *  1. Se verifica que el vehiculo sigue disponible (`in_inventory` o
- *     `reserved`) y que no tiene ya una venta (UNIQUE de `sales.vehicle_id`).
+ *     `reserved`) y que no tiene ya una venta vigente (indice unico parcial
+ *     `uq_sales_vehicle_active`; las canceladas no cuentan).
  *  2. Se crea la venta en estado `in_process`.
  *  3. El vehiculo pasa a `sold`.
  *  4. La reserva de origen, si existe, queda `converted`; lo mismo la
@@ -95,8 +101,12 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
       return err(new InactiveClientError(input.clientId));
     }
 
-    if ((await this.catalog.findCurrencyById(input.currencyId)) === null) {
+    const currency = await this.catalog.findCurrencyById(input.currencyId);
+    if (currency === null) {
       return err(new CurrencyNotFoundError(input.currencyId));
+    }
+    if (!isExchangeRateConsistent(currency.code, input.exchangeRate)) {
+      return err(new InconsistentExchangeRateError(currency.code, input.exchangeRate));
     }
 
     if (input.initialPayment !== null) {

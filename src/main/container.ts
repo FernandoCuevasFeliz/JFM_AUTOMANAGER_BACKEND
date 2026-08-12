@@ -48,6 +48,13 @@ import { ListSuppliersUseCase } from '../application/suppliers/list-suppliers.us
 import { UpdateSupplierUseCase } from '../application/suppliers/update-supplier.use-case';
 import { AuthenticateUserUseCase } from '../application/users/authenticate-user.use-case';
 import { ChangePasswordUseCase } from '../application/users/change-password.use-case';
+import { SessionIssuer } from '../application/users/issue-session';
+import { LogoutUseCase } from '../application/users/logout.use-case';
+import {
+  ListActiveSessionsUseCase,
+  LogoutAllSessionsUseCase,
+} from '../application/users/manage-sessions.use-case';
+import { RefreshSessionUseCase } from '../application/users/refresh-session.use-case';
 import { CreateUserUseCase } from '../application/users/create-user.use-case';
 import { DeleteUserUseCase } from '../application/users/delete-user.use-case';
 import { GetUserUseCase } from '../application/users/get-user.use-case';
@@ -77,6 +84,7 @@ import type { TokenService } from '../domain/users/token-service';
 import { AsyncLocalAuditContext } from '../infrastructure/audit/async-local-audit-context';
 import { KyselyAuditLogRepository } from '../infrastructure/audit/kysely-audit-log.repository';
 import { BcryptPasswordHasher } from '../infrastructure/auth/bcrypt-password-hasher';
+import { CryptoRefreshTokenGenerator } from '../infrastructure/auth/crypto-refresh-token-generator';
 import { JwtTokenService } from '../infrastructure/auth/jwt-token-service';
 import { env } from '../infrastructure/config/env';
 import { createDatabase, createPool, type Database } from '../infrastructure/database/connection';
@@ -87,6 +95,7 @@ import { KyselyClientRepository } from '../infrastructure/repositories/kysely-cl
 import { KyselyExpenseRepository } from '../infrastructure/repositories/kysely-expense.repository';
 import { KyselyPurchaseRepository } from '../infrastructure/repositories/kysely-purchase.repository';
 import { KyselyQuotationRepository } from '../infrastructure/repositories/kysely-quotation.repository';
+import { KyselyRefreshTokenRepository } from '../infrastructure/repositories/kysely-refresh-token.repository';
 import { KyselyReservationRepository } from '../infrastructure/repositories/kysely-reservation.repository';
 import { KyselyRoleRepository } from '../infrastructure/repositories/kysely-role.repository';
 import { KyselySaleRepository } from '../infrastructure/repositories/kysely-sale.repository';
@@ -148,6 +157,8 @@ export function buildContainer(): Container {
     issuer: env.JWT_ISSUER,
   });
 
+  const refreshTokenGenerator = new CryptoRefreshTokenGenerator();
+
   const auditContext = new AsyncLocalAuditContext();
   const auditRepository = new KyselyAuditLogRepository(db);
   const audit: AuditDependencies = {
@@ -162,6 +173,7 @@ export function buildContainer(): Container {
   // --- Repositorios ---------------------------------------------------------
   const users = new KyselyUserRepository(db);
   const roles = new KyselyRoleRepository(db);
+  const refreshTokens = new KyselyRefreshTokenRepository(db);
   const catalog = new KyselyCatalogRepository(db);
   const vehicles = new KyselyVehicleRepository(db);
   const vehicleCatalog = new KyselyVehicleCatalogRepository(db);
@@ -173,9 +185,28 @@ export function buildContainer(): Container {
   const reservations = new KyselyReservationRepository(db);
   const sales = new KyselySaleRepository(db);
 
+  // --- Sesiones -------------------------------------------------------------
+  const sessionIssuer = new SessionIssuer(
+    tokens,
+    refreshTokens,
+    refreshTokenGenerator,
+    clock,
+    env.REFRESH_TOKEN_EXPIRES_IN_DAYS,
+  );
+
   // --- Controladores --------------------------------------------------------
   const usersController = new UsersController({
-    authenticateUser: new AuthenticateUserUseCase(users, passwordHasher, tokens, clock),
+    authenticateUser: new AuthenticateUserUseCase(users, passwordHasher, sessionIssuer, clock),
+    refreshSession: new RefreshSessionUseCase(
+      refreshTokens,
+      users,
+      refreshTokenGenerator,
+      sessionIssuer,
+      clock,
+    ),
+    logout: new LogoutUseCase(refreshTokens, refreshTokenGenerator),
+    listActiveSessions: new ListActiveSessionsUseCase(refreshTokens),
+    logoutAllSessions: new LogoutAllSessionsUseCase(refreshTokens),
     getUser: new GetUserUseCase(users),
     listUsers: new ListUsersUseCase(users),
     listRoles: new ListRolesUseCase(roles),
@@ -190,12 +221,12 @@ export function buildContainer(): Container {
       audit,
     ),
     deleteUser: withAudit(
-      new DeleteUserUseCase(users),
+      new DeleteUserUseCase(users, refreshTokens),
       { table: 'users', action: 'delete', recordIdFromInput: (input) => input.userId },
       audit,
     ),
     changePassword: withAudit(
-      new ChangePasswordUseCase(users, passwordHasher),
+      new ChangePasswordUseCase(users, passwordHasher, refreshTokens),
       { table: 'users', action: 'update', recordIdFromInput: (input) => input.userId },
       audit,
     ),

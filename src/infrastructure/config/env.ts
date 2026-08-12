@@ -22,6 +22,9 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('8h'),
   JWT_ISSUER: z.string().default('jfm-automanager'),
 
+  /** Vigencia del refresh token, en dias. Define cuanto dura la sesion. */
+  REFRESH_TOKEN_EXPIRES_IN_DAYS: z.coerce.number().int().positive().max(365).default(30),
+
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(4).max(15).default(10),
 
   LOG_LEVEL: z

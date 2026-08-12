@@ -2,6 +2,7 @@ import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
 import { CurrencyNotFoundError, PaymentMethodNotFoundError } from '../../domain/catalogs/catalog.errors';
 import { acceptsPayments, pendingBalance, type SalePayment } from '../../domain/sales/sale.entity';
 import {
+  PaymentCurrencyMismatchError,
   PaymentExceedsBalanceError,
   SaleDoesNotAcceptPaymentsError,
   SaleNotFoundError,
@@ -54,7 +55,8 @@ export class RegisterSalePaymentUseCase
       return err(new PaymentMethodNotFoundError(input.paymentMethodId));
     }
 
-    if ((await this.catalog.findCurrencyById(input.currencyId)) === null) {
+    const currency = await this.catalog.findCurrencyById(input.currencyId);
+    if (currency === null) {
       return err(new CurrencyNotFoundError(input.currencyId));
     }
 
@@ -66,6 +68,13 @@ export class RegisterSalePaymentUseCase
 
       if (!acceptsPayments(sale)) {
         return err(new SaleDoesNotAcceptPaymentsError(sale.status));
+      }
+
+      // Sin esta comprobacion, `totalPaid` sumaria importes de monedas
+      // distintas y el saldo pendiente quedaria mal calculado.
+      if (input.currencyId !== sale.currencyId) {
+        const saleCurrency = await this.catalog.findCurrencyById(sale.currencyId);
+        return err(new PaymentCurrencyMismatchError(saleCurrency?.code ?? sale.currencyId));
       }
 
       const alreadyPaid = await trx.sales.totalPaid(input.saleId);

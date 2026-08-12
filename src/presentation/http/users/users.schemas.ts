@@ -19,6 +19,15 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'La contrasena es obligatoria'),
 });
 
+/**
+ * El refresh token viaja en el cuerpo, no en una cabecera: es un secreto de
+ * larga vida y las cabeceras acaban con mas frecuencia en los logs de los
+ * proxies intermedios.
+ */
+export const refreshSessionSchema = z.object({
+  refreshToken: z.string().min(1, 'El refresh token es obligatorio').max(512),
+});
+
 export const createUserSchema = z.object({
   roleId: uuid,
   firstName: requiredString(100, 'El nombre'),
@@ -56,6 +65,7 @@ export const listUsersQuerySchema = paginationQuery.extend({
 });
 
 export type LoginBody = z.infer<typeof loginSchema>;
+export type RefreshSessionBody = z.infer<typeof refreshSessionSchema>;
 export type CreateUserBody = z.infer<typeof createUserSchema>;
 export type UpdateUserBody = z.infer<typeof updateUserSchema>;
 export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;

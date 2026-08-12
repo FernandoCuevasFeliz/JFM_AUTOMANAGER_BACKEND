@@ -1,5 +1,8 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
-import { CurrencyNotFoundError } from '../../domain/catalogs/catalog.errors';
+import {
+  CurrencyNotFoundError,
+  InconsistentExchangeRateError,
+} from '../../domain/catalogs/catalog.errors';
 import type {
   NewPurchaseItem,
   PurchaseStatus,
@@ -13,6 +16,7 @@ import {
 } from '../../domain/purchases/purchase.errors';
 import type { PurchaseRepository } from '../../domain/purchases/purchase.repository';
 import type { DomainError } from '../../domain/shared/domain-error';
+import { isExchangeRateConsistent } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import type { UnitOfWork } from '../../domain/shared/unit-of-work';
 import { InactiveSupplierError, SupplierNotFoundError } from '../../domain/suppliers/supplier.errors';
@@ -75,8 +79,12 @@ export class CreatePurchaseUseCase implements UseCase<CreatePurchaseInput, Purch
       return err(new InactiveSupplierError(input.supplierId));
     }
 
-    if ((await this.catalog.findCurrencyById(input.currencyId)) === null) {
+    const currency = await this.catalog.findCurrencyById(input.currencyId);
+    if (currency === null) {
       return err(new CurrencyNotFoundError(input.currencyId));
+    }
+    if (!isExchangeRateConsistent(currency.code, input.exchangeRate)) {
+      return err(new InconsistentExchangeRateError(currency.code, input.exchangeRate));
     }
 
     if (

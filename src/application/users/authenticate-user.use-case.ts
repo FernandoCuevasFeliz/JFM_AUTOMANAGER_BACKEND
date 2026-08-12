@@ -2,27 +2,22 @@ import type { Clock } from '../../domain/shared/clock';
 import type { DomainError } from '../../domain/shared/domain-error';
 import { err, ok, type Result } from '../../domain/shared/result';
 import type { PasswordHasher } from '../../domain/users/password-hasher';
-import { type Permission, permissionsForRole } from '../../domain/users/permissions';
-import type { TokenService } from '../../domain/users/token-service';
-import { canAuthenticate, type PublicUser, toPublicUser } from '../../domain/users/user.entity';
+import { canAuthenticate } from '../../domain/users/user.entity';
 import { InactiveUserError, InvalidCredentialsError } from '../../domain/users/user.errors';
 import type { UserRepository } from '../../domain/users/user.repository';
+import type { IssuedSession, SessionContext, SessionIssuer } from './issue-session';
 import type { UseCase } from '../shared/use-case';
 
-export interface AuthenticateUserInput {
+export interface AuthenticateUserInput extends SessionContext {
   readonly email: string;
   readonly password: string;
 }
 
-export interface AuthenticateUserOutput {
-  readonly token: string;
-  readonly expiresAt: Date;
-  readonly user: PublicUser & { readonly roleName: string };
-  readonly permissions: readonly Permission[];
-}
+export type AuthenticateUserOutput = IssuedSession;
 
 /**
- * Login por correo y contrasena.
+ * Login por correo y contrasena. Devuelve un access token de vida corta y un
+ * refresh token con el que renovarlo sin volver a pedir credenciales.
  *
  * Si el correo no existe igualmente se ejecuta una comparacion de bcrypt
  * contra un hash ficticio: sin eso, un correo inexistente responderia
@@ -39,7 +34,7 @@ export class AuthenticateUserUseCase
   constructor(
     private readonly users: UserRepository,
     private readonly passwordHasher: PasswordHasher,
-    private readonly tokens: TokenService,
+    private readonly sessions: SessionIssuer,
     private readonly clock: Clock,
   ) {}
 
@@ -63,20 +58,13 @@ export class AuthenticateUserUseCase
       return err(new InactiveUserError());
     }
 
-    const issued = this.tokens.issue({
-      userId: user.id,
-      email: user.email,
-      roleId: user.roleId,
-      roleName: user.roleName,
+    const session = await this.sessions.issue(user, {
+      userAgent: input.userAgent,
+      ipAddress: input.ipAddress,
     });
 
     await this.users.touchLastLogin(user.id, this.clock.now());
 
-    return ok({
-      token: issued.token,
-      expiresAt: issued.expiresAt,
-      user: { ...toPublicUser(user), roleName: user.roleName },
-      permissions: permissionsForRole(user.roleName),
-    });
+    return ok(session);
   }
 }

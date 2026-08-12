@@ -8,6 +8,7 @@ import type {
   VehicleCostSummary,
 } from '../../domain/expenses/expense.entity';
 import type { ExpenseFilters, ExpenseRepository } from '../../domain/expenses/expense.repository';
+import { REPORTING_CURRENCY_CODE, toReportingCurrency } from '../../domain/shared/money';
 import {
   buildPaginatedResult,
   type PageQuery,
@@ -35,6 +36,7 @@ function mapExpense(row: Selectable<ExpensesTable>): Expense {
     paymentMethodId: row.payment_method_id,
     description: row.description,
     amount: toNumber(row.amount),
+    exchangeRate: toNumber(row.exchange_rate),
     expenseDate: row.expense_date,
     createdBy: row.created_by,
     createdAt: toDate(row.created_at),
@@ -148,6 +150,7 @@ export class KyselyExpenseRepository implements ExpenseRepository {
         payment_method_id: data.paymentMethodId,
         description: data.description,
         amount: data.amount,
+        exchange_rate: data.exchangeRate,
         expense_date: data.expenseDate,
         created_by: data.createdBy,
       })
@@ -165,6 +168,7 @@ export class KyselyExpenseRepository implements ExpenseRepository {
       ...(data.paymentMethodId !== undefined ? { payment_method_id: data.paymentMethodId } : {}),
       ...(data.description !== undefined ? { description: data.description } : {}),
       ...(data.amount !== undefined ? { amount: data.amount } : {}),
+      ...(data.exchangeRate !== undefined ? { exchange_rate: data.exchangeRate } : {}),
       ...(data.expenseDate !== undefined ? { expense_date: data.expenseDate } : {}),
     };
 
@@ -194,10 +198,11 @@ export class KyselyExpenseRepository implements ExpenseRepository {
     return Number(result.numUpdatedRows) > 0;
   }
 
+  /** Total de gastos del vehiculo ya convertido a la moneda de reporte. */
   async sumByVehicle(vehicleId: string): Promise<number> {
     const row = await this.db
       .selectFrom('expenses')
-      .select((eb) => eb.fn.sum<number>('amount').as('total'))
+      .select((eb) => eb.fn.sum<number>(sql`amount * exchange_rate`).as('total'))
       .where('vehicle_id', '=', vehicleId)
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
@@ -207,13 +212,16 @@ export class KyselyExpenseRepository implements ExpenseRepository {
 
   /**
    * Costo real de la unidad. Cruza tres fuentes:
-   *   - `purchase_items`: lo que costo traerla (compra, flete, seguro, aduana).
-   *   - `expenses`: todo lo gastado en ella despues (taller, placas, etc.).
+   *   - `purchase_items`: lo que costo traerla (compra, flete, seguro, aduana),
+   *     en la moneda de la compra.
+   *   - `expenses`: todo lo gastado en ella despues (taller, placas, etc.),
+   *     posiblemente en varias monedas.
    *   - `sales`: a cuanto se vendio realmente, si ya se vendio.
    *
-   * Todos los montos se toman en su moneda original; la conversion a una
-   * moneda unica de reporte queda fuera de alcance (la empresa opera compras en
-   * USD y ventas en DOP con tasas que se registran por documento).
+   * Cada importe se lleva a la moneda de reporte con la tasa registrada EN SU
+   * PROPIO DOCUMENTO (ver `domain/shared/money.ts`), que es lo que permite
+   * sumar una compra en dolares con gastos en pesos y obtener un costo real
+   * comparable con el precio de venta.
    */
   async vehicleCostSummary(vehicleId: string): Promise<VehicleCostSummary | null> {
     const vehicle = await this.db
@@ -227,46 +235,102 @@ export class KyselyExpenseRepository implements ExpenseRepository {
       return null;
     }
 
+    // La tasa y la moneda del item de compra viven en el encabezado.
     const purchaseItem = await this.db
       .selectFrom('purchase_items')
-      .select(['unit_cost', 'freight_cost', 'insurance_cost', 'other_costs'])
-      .where('vehicle_id', '=', vehicleId)
+      .innerJoin('purchases', 'purchases.id', 'purchase_items.purchase_id')
+      .innerJoin('currencies', 'currencies.id', 'purchases.currency_id')
+      .select([
+        'purchase_items.unit_cost',
+        'purchase_items.freight_cost',
+        'purchase_items.insurance_cost',
+        'purchase_items.other_costs',
+        'purchases.exchange_rate',
+        'currencies.code as currency_code',
+      ])
+      .where('purchase_items.vehicle_id', '=', vehicleId)
+      .where('purchases.deleted_at', 'is', null)
       .executeTakeFirst();
 
-    const expensesTotal = await this.sumByVehicle(vehicleId);
+    const expenseRows = await this.db
+      .selectFrom('expenses')
+      .innerJoin('currencies', 'currencies.id', 'expenses.currency_id')
+      .select((eb) => [
+        'currencies.code as currency_code',
+        eb.fn.sum<number>('expenses.amount').as('total'),
+        eb.fn.sum<number>(sql`expenses.amount * expenses.exchange_rate`).as('total_converted'),
+      ])
+      .where('expenses.vehicle_id', '=', vehicleId)
+      .where('expenses.deleted_at', 'is', null)
+      .groupBy('currencies.code')
+      .orderBy('currencies.code', 'asc')
+      .execute();
 
     const sale = await this.db
       .selectFrom('sales')
-      .select(['sale_price'])
-      .where('vehicle_id', '=', vehicleId)
-      .where('status', '!=', 'cancelled')
-      .where('deleted_at', 'is', null)
+      .innerJoin('currencies', 'currencies.id', 'sales.currency_id')
+      .select(['sales.sale_price', 'sales.exchange_rate', 'currencies.code as currency_code'])
+      .where('sales.vehicle_id', '=', vehicleId)
+      .where('sales.status', '!=', 'cancelled')
+      .where('sales.deleted_at', 'is', null)
       .executeTakeFirst();
 
     const purchaseCost = toNumber(purchaseItem?.unit_cost ?? 0);
     const freightCost = toNumber(purchaseItem?.freight_cost ?? 0);
     const insuranceCost = toNumber(purchaseItem?.insurance_cost ?? 0);
     const otherPurchaseCosts = toNumber(purchaseItem?.other_costs ?? 0);
+    const purchaseExchangeRate =
+      purchaseItem === undefined ? null : toNumber(purchaseItem.exchange_rate);
 
-    const totalCost = round2(
-      purchaseCost + freightCost + insuranceCost + otherPurchaseCosts + expensesTotal,
+    const importSubtotal = round2(
+      purchaseCost + freightCost + insuranceCost + otherPurchaseCosts,
+    );
+    const importSubtotalConverted = toReportingCurrency(
+      importSubtotal,
+      purchaseExchangeRate ?? 1,
     );
 
+    const expensesByCurrency = expenseRows.map((row) => ({
+      currencyCode: row.currency_code.trim(),
+      total: round2(toNumber(row.total)),
+      totalConverted: round2(toNumber(row.total_converted)),
+    }));
+
+    const expensesTotalConverted = round2(
+      expensesByCurrency.reduce((sum, entry) => sum + entry.totalConverted, 0),
+    );
+
+    const totalCostConverted = round2(importSubtotalConverted + expensesTotalConverted);
+
     const soldPrice = sale === undefined ? null : toNumber(sale.sale_price);
-    const margin = soldPrice === null ? null : round2(soldPrice - totalCost);
+    const soldPriceConverted =
+      sale === undefined ? null : toReportingCurrency(soldPrice ?? 0, toNumber(sale.exchange_rate));
+
+    const margin =
+      soldPriceConverted === null ? null : round2(soldPriceConverted - totalCostConverted);
     const marginPercentage =
-      margin === null || totalCost === 0 ? null : round2((margin / totalCost) * 100);
+      margin === null || totalCostConverted === 0
+        ? null
+        : round2((margin / totalCostConverted) * 100);
 
     return {
       vehicleId,
+      reportingCurrency: REPORTING_CURRENCY_CODE,
+      purchaseCurrencyCode: purchaseItem?.currency_code.trim() ?? null,
+      purchaseExchangeRate,
       purchaseCost,
       freightCost,
       insuranceCost,
       otherPurchaseCosts,
-      expensesTotal,
-      totalCost,
+      importSubtotal,
+      importSubtotalConverted,
+      expensesByCurrency,
+      expensesTotalConverted,
+      totalCostConverted,
       listPrice: toNullableNumber(vehicle.sale_price),
+      saleCurrencyCode: sale?.currency_code.trim() ?? null,
       soldPrice,
+      soldPriceConverted,
       margin,
       marginPercentage,
     };

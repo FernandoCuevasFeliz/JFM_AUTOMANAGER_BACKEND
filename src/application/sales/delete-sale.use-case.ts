@@ -9,17 +9,16 @@ export interface DeleteSaleInput {
 }
 
 /**
- * Elimina una venta ya cancelada para liberar el vehiculo.
+ * Archiva una venta cancelada (borrado logico).
  *
- * `sales.vehicle_id` es UNIQUE sin condicion, de modo que un registro de venta
- * cancelado (o borrado logicamente, que para la base sigue siendo una fila)
- * impide registrar una venta nueva sobre ese vehiculo. Por eso este es el
- * unico borrado fisico del sistema, y solo aplica a ventas canceladas; sus
- * pagos se eliminan en cascada.
+ * Solo se admiten ventas ya canceladas: cancelar es lo que revierte el efecto
+ * sobre el inventario, y solo despues tiene sentido sacar el documento de las
+ * listas de trabajo.
  *
- * La alternativa es cambiar el UNIQUE por un indice unico parcial que ignore
- * las canceladas; esta propuesto en el README pero no aplicado, para no tocar
- * el esquema entregado.
+ * Con el indice unico parcial `uq_sales_vehicle_active` (migracion 003), este
+ * borrado ya NO es necesario para revender el vehiculo: cancelar la venta basta.
+ * Queda como limpieza de documentos anulados, y por eso es logico y no fisico:
+ * los pagos ya cobrados y devueltos siguen siendo consultables.
  */
 export class DeleteSaleUseCase implements UseCase<DeleteSaleInput, void> {
   constructor(private readonly sales: SaleRepository) {}
@@ -34,7 +33,7 @@ export class DeleteSaleUseCase implements UseCase<DeleteSaleInput, void> {
       return err(new SaleNotEditableError(sale.status));
     }
 
-    const deleted = await this.sales.hardDelete(input.saleId);
+    const deleted = await this.sales.softDelete(input.saleId);
     if (!deleted) {
       return err(new SaleNotFoundError(input.saleId));
     }

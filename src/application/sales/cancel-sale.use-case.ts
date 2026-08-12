@@ -16,10 +16,10 @@ export interface CancelSaleInput {
  * En la misma transaccion la venta pasa a `cancelled` y el vehiculo vuelve a
  * `in_inventory`: es la unica via por la que una unidad sale del estado `sold`.
  *
- * Importante: la venta cancelada permanece en la tabla y `sales.vehicle_id` es
- * UNIQUE, asi que el vehiculo NO podra venderse de nuevo mientras ese registro
- * exista. Para revenderlo hay que eliminar la venta cancelada
- * (`delete-sale.use-case.ts`). Ver la nota sobre este constraint en el README.
+ * La venta cancelada permanece en la tabla como historial. Gracias al indice
+ * unico parcial `uq_sales_vehicle_active` (migracion 003) eso no bloquea nada:
+ * el vehiculo queda inmediatamente disponible para venderse de nuevo, sin
+ * necesidad de borrar el documento anulado.
  */
 export class CancelSaleUseCase implements UseCase<CancelSaleInput, SaleWithDetails> {
   constructor(

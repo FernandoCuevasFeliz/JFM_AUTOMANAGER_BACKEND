@@ -17,6 +17,7 @@ import type {
   SaleRepository,
   SalesSummary,
 } from '../../domain/sales/sale.repository';
+import { REPORTING_CURRENCY_CODE } from '../../domain/shared/money';
 import {
   buildPaginatedResult,
   type PageQuery,
@@ -110,6 +111,7 @@ export class KyselySaleRepository implements SaleRepository {
       .selectFrom('sales')
       .selectAll()
       .where('vehicle_id', '=', vehicleId)
+      .where('status', '!=', 'cancelled')
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
 
@@ -127,15 +129,18 @@ export class KyselySaleRepository implements SaleRepository {
   }
 
   /**
-   * Sin filtrar por estado ni por `deleted_at`: el UNIQUE de
-   * `sales.vehicle_id` es incondicional, asi que cualquier fila existente
-   * bloquea una venta nueva sobre ese vehiculo.
+   * Mismos predicados que el indice unico parcial `uq_sales_vehicle_active`:
+   * una venta cancelada o borrada logicamente no bloquea una venta nueva.
+   * Si esta comprobacion y el indice se separaran, el dominio dejaria pasar
+   * casos que la base rechazaria con un 500.
    */
   async isVehicleSold(vehicleId: string): Promise<boolean> {
     const row = await this.db
       .selectFrom('sales')
       .select('id')
       .where('vehicle_id', '=', vehicleId)
+      .where('status', '!=', 'cancelled')
+      .where('deleted_at', 'is', null)
       .executeTakeFirst();
 
     return row !== undefined;
@@ -223,10 +228,15 @@ export class KyselySaleRepository implements SaleRepository {
     return row === undefined ? null : mapSale(row);
   }
 
-  async hardDelete(id: string): Promise<boolean> {
-    // `sale_payments` tiene ON DELETE CASCADE: los abonos se van con la venta.
-    const result = await this.db.deleteFrom('sales').where('id', '=', id).executeTakeFirst();
-    return Number(result.numDeletedRows) > 0;
+  async softDelete(id: string): Promise<boolean> {
+    const result = await this.db
+      .updateTable('sales')
+      .set({ deleted_at: sql<Date>`now()` })
+      .where('id', '=', id)
+      .where('deleted_at', 'is', null)
+      .executeTakeFirst();
+
+    return Number(result.numUpdatedRows) > 0;
   }
 
   async summary(filters: SaleFilters): Promise<SalesSummary> {
@@ -235,19 +245,26 @@ export class KyselySaleRepository implements SaleRepository {
     const totals = await base
       .select((eb) => [
         eb.fn.countAll<number>().as('total_sales'),
-        eb.fn.sum<number>('sales.sale_price').as('total_amount'),
+        eb.fn.sum<number>(sql`sales.sale_price * sales.exchange_rate`).as('total_amount'),
       ])
       .executeTakeFirstOrThrow();
 
+    // El abono se registra siempre en la moneda de la venta (lo garantiza
+    // `register-sale-payment`), asi que se convierte con la tasa de la venta.
     const collected = await this.applyFilters(this.baseJoin(), filters)
       .innerJoin('sale_payments', 'sale_payments.sale_id', 'sales.id')
-      .select((eb) => eb.fn.sum<number>('sale_payments.amount').as('total_collected'))
+      .select((eb) =>
+        eb.fn
+          .sum<number>(sql`sale_payments.amount * sales.exchange_rate`)
+          .as('total_collected'),
+      )
       .executeTakeFirst();
 
     const totalAmount = round2(toNumber(totals.total_amount ?? 0));
     const totalCollected = round2(toNumber(collected?.total_collected ?? 0));
 
     return {
+      reportingCurrency: REPORTING_CURRENCY_CODE,
       totalSales: Number(totals.total_sales),
       totalAmount,
       totalCollected,

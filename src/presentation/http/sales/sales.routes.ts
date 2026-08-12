@@ -64,11 +64,7 @@ export function buildSalesRoutes(controller: SalesController): Router {
     asyncHandler(controller.cancel),
   );
 
-  /**
-   * Borrado fisico de una venta cancelada. Libera el UNIQUE de
-   * `sales.vehicle_id` para poder revender la unidad; por eso exige el permiso
-   * mas fuerte del modulo.
-   */
+  /** Archiva (borrado logico) una venta ya cancelada. */
   router.delete(
     '/:id',
     requirePermission('sales:delete'),

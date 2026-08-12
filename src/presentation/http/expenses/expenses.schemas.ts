@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   booleanQuery,
   dateOnly,
+  exchangeRate,
   paginationQuery,
   positiveMoney,
   requiredString,
@@ -20,6 +21,7 @@ export const createExpenseSchema = z.object({
   paymentMethodId: uuid,
   description: requiredString(255, 'La descripcion'),
   amount: positiveMoney,
+  exchangeRate: exchangeRate.default(1),
   expenseDate: dateOnly,
 });
 
@@ -31,6 +33,7 @@ export const updateExpenseSchema = z
     paymentMethodId: uuid.optional(),
     description: requiredString(255, 'La descripcion').optional(),
     amount: positiveMoney.optional(),
+    exchangeRate: exchangeRate.optional(),
     expenseDate: dateOnly.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'Debe enviar al menos un campo a modificar');

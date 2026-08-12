@@ -140,6 +140,19 @@ export interface UsersTable {
   deleted_at: Timestamp | null;
 }
 
+export interface RefreshTokensTable {
+  id: Generated<string>;
+  user_id: string;
+  /** SHA-256 del token en hexadecimal. Nunca se guarda el token en claro. */
+  token_hash: string;
+  expires_at: Timestamp;
+  revoked_at: Timestamp | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
 export interface AuditLogsTable {
   id: Generated<string>;
   user_id: string | null;
@@ -259,6 +272,7 @@ export interface ExpensesTable {
   payment_method_id: string;
   description: string;
   amount: Numeric;
+  exchange_rate: GeneratedNumeric;
   expense_date: DateOnly;
   created_by: string;
   created_at: GeneratedTimestamp;
@@ -344,6 +358,7 @@ export interface DB {
   purchase_items: PurchaseItemsTable;
   purchases: PurchasesTable;
   quotations: QuotationsTable;
+  refresh_tokens: RefreshTokensTable;
   reservations: ReservationsTable;
   roles: RolesTable;
   sale_payments: SalePaymentsTable;

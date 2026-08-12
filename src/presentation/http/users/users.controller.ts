@@ -7,6 +7,12 @@ import type { DeleteUserUseCase } from '../../../application/users/delete-user.u
 import type { GetUserUseCase } from '../../../application/users/get-user.use-case';
 import type { ListRolesUseCase } from '../../../application/users/list-roles.use-case';
 import type { ListUsersUseCase } from '../../../application/users/list-users.use-case';
+import type { LogoutUseCase } from '../../../application/users/logout.use-case';
+import type {
+  ListActiveSessionsUseCase,
+  LogoutAllSessionsUseCase,
+} from '../../../application/users/manage-sessions.use-case';
+import type { RefreshSessionUseCase } from '../../../application/users/refresh-session.use-case';
 import type { UpdateUserUseCase } from '../../../application/users/update-user.use-case';
 import { requireActorId } from '../../middlewares/auth.middleware';
 import { compact, toPageQuery } from '../shared/common.schemas';
@@ -16,9 +22,22 @@ import type {
   CreateUserBody,
   ListUsersQuery,
   LoginBody,
+  RefreshSessionBody,
   ResetPasswordBody,
   UpdateUserBody,
 } from './users.schemas';
+
+/**
+ * Dispositivo desde el que se abre la sesion, para que el usuario reconozca
+ * sus sesiones activas. El user-agent se recorta a los 255 caracteres de la
+ * columna.
+ */
+function sessionContext(req: Request): { userAgent: string | null; ipAddress: string | null } {
+  return {
+    userAgent: req.header('user-agent')?.slice(0, 255) ?? null,
+    ipAddress: req.ip?.slice(0, 45) ?? null,
+  };
+}
 
 export interface UsersControllerDeps {
   readonly authenticateUser: UseCaseOf<AuthenticateUserUseCase>;
@@ -29,6 +48,10 @@ export interface UsersControllerDeps {
   readonly deleteUser: UseCaseOf<DeleteUserUseCase>;
   readonly changePassword: UseCaseOf<ChangePasswordUseCase>;
   readonly listRoles: UseCaseOf<ListRolesUseCase>;
+  readonly refreshSession: UseCaseOf<RefreshSessionUseCase>;
+  readonly logout: UseCaseOf<LogoutUseCase>;
+  readonly listActiveSessions: UseCaseOf<ListActiveSessionsUseCase>;
+  readonly logoutAllSessions: UseCaseOf<LogoutAllSessionsUseCase>;
 }
 
 export class UsersController {
@@ -36,7 +59,39 @@ export class UsersController {
 
   login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const body = req.body as LoginBody;
-    const result = await this.deps.authenticateUser.execute(body);
+    const result = await this.deps.authenticateUser.execute({
+      ...body,
+      ...sessionContext(req),
+    });
+    sendResult(res, next, result);
+  };
+
+  refresh = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const body = req.body as RefreshSessionBody;
+    const result = await this.deps.refreshSession.execute({
+      refreshToken: body.refreshToken,
+      ...sessionContext(req),
+    });
+    sendResult(res, next, result);
+  };
+
+  logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const body = req.body as RefreshSessionBody;
+    const result = await this.deps.logout.execute({ refreshToken: body.refreshToken });
+    sendResult(res, next, result, 204);
+  };
+
+  sessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.listActiveSessions.execute({
+      actorUserId: requireActorId(req),
+    });
+    sendResult(res, next, result);
+  };
+
+  logoutAll = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.logoutAllSessions.execute({
+      actorUserId: requireActorId(req),
+    });
     sendResult(res, next, result);
   };
 

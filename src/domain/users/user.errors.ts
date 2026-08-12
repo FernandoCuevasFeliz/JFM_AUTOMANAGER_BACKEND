@@ -45,3 +45,26 @@ export class SamePasswordError extends BusinessRuleError {
     super('La nueva contrasena debe ser distinta de la actual');
   }
 }
+
+/**
+ * El refresh token no existe, expiro o ya fue revocado. Igual que en el login,
+ * el mensaje no distingue entre los tres casos.
+ */
+export class InvalidRefreshTokenError extends UnauthorizedError {
+  constructor() {
+    super('La sesion no es valida o expiro. Inicie sesion de nuevo');
+  }
+}
+
+/**
+ * Se presento un refresh token ya rotado. Como cada token es de un solo uso,
+ * que reaparezca significa que alguien conserva una copia: se cierran todas las
+ * sesiones del usuario por precaucion.
+ */
+export class RefreshTokenReuseDetectedError extends UnauthorizedError {
+  constructor() {
+    super(
+      'Se detecto un uso indebido de la sesion. Por seguridad se cerraron todas las sesiones activas',
+    );
+  }
+}

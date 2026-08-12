@@ -57,6 +57,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 | `JWT_SECRET` | **sí** | Secreto de firma, mínimo 32 caracteres |
 | `JWT_EXPIRES_IN` | no | Vigencia del access token (por defecto `8h`) |
 | `JWT_ISSUER` | no | Emisor del token (por defecto `jfm-automanager`) |
+| `REFRESH_TOKEN_EXPIRES_IN_DAYS` | no | Duración de la sesión en días (por defecto `30`) |
 | `BCRYPT_SALT_ROUNDS` | no | Costo de bcrypt (por defecto `10`) |
 | `LOG_LEVEL` | no | `fatal`…`trace` (por defecto `info`) |
 | `CORS_ORIGINS` | no | Orígenes separados por coma, o `*` |
@@ -75,12 +76,19 @@ createdb ejgh_autoimport
 npm run db:migrate
 ```
 
-Aplica dos migraciones:
+Aplica cinco migraciones:
 
 1. **`001_initial_schema`** — transcripción literal de `schema_ejgh_autoimport.sql`: extensión
    `pgcrypto`, los 8 ENUM, las 20 tablas, índices y los triggers de `updated_at`.
 2. **`002_seed_catalogs`** — catálogos base (monedas, tipos de documento, métodos de pago, roles) y
    un juego inicial de categorías de gasto. Es idempotente (`ON CONFLICT DO NOTHING`).
+3. **`003_sales_vehicle_partial_unique`** — sustituye el `UNIQUE` de `sales.vehicle_id` por un
+   índice único parcial que ignora las ventas canceladas.
+4. **`004_refresh_tokens`** — tabla `refresh_tokens` para sesiones persistentes.
+5. **`005_expenses_exchange_rate`** — añade `exchange_rate` a `expenses`.
+
+Las tres últimas modifican el esquema entregado; el porqué de cada una está en
+[Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado).
 
 Para revertir la última migración:
 
@@ -297,10 +305,11 @@ abrirla: así dos vendedores que registren la misma unidad a la vez no pueden pa
 
 ### Restricciones `UNIQUE` traducidas a errores de negocio
 
-`purchase_items.vehicle_id` y `sales.vehicle_id` son `UNIQUE` en la base (un vehículo se compra y se
-vende una sola vez). El dominio comprueba ambas antes de insertar y devuelve **409 con un mensaje
-que explica la regla** (`VehicleAlreadyPurchasedError`, `VehicleAlreadySoldError`) en lugar de dejar
-escapar el error de constraint de Postgres como un 500.
+Un vehículo se compra una sola vez (`purchase_items.vehicle_id UNIQUE`) y no puede tener dos ventas
+vigentes a la vez (índice parcial `uq_sales_vehicle_active`). El dominio comprueba ambas **con los
+mismos predicados que la base** antes de insertar, y devuelve **409 con un mensaje que explica la
+regla** (`VehicleAlreadyPurchasedError`, `VehicleAlreadySoldError`) en lugar de dejar escapar el
+error de constraint de Postgres como un 500.
 
 ### Otras reglas
 
@@ -319,12 +328,47 @@ escapar el error de constraint de Postgres como un 500.
 
 ### Autenticación
 
-`POST /api/v1/auth/login` es el **único endpoint público**. Devuelve un access token JWT (HS256) con
-el id del usuario en `sub` y el nombre de su rol. El resto de la API exige
-`Authorization: Bearer <token>`.
+`POST /api/v1/auth/login` y `POST /api/v1/auth/refresh` son los **únicos endpoints públicos**: el
+refresco no puede exigir un access token válido, porque su razón de ser es que ese token ya expiró.
+El resto de la API exige `Authorization: Bearer <token>`.
+
+El login devuelve dos credenciales:
+
+- un **access token** JWT (HS256) de vida corta, con el id del usuario en `sub` y el nombre de su
+  rol; es el que autoriza cada petición;
+- un **refresh token**, secreto opaco de 384 bits con el que obtener un access token nuevo sin
+  volver a pedir la contraseña.
 
 El login ejecuta una comparación bcrypt contra un hash señuelo cuando el correo no existe, para que
 un correo inexistente no responda notablemente más rápido que uno existente (enumeración por tiempo).
+
+#### Sesiones y rotación
+
+```
+POST /auth/login       -> { accessToken, expiresAt, refreshToken, refreshExpiresAt, user, permissions }
+POST /auth/refresh     -> mismo objeto, con un refreshToken NUEVO
+POST /auth/logout      -> 204, revoca el refresh token presentado
+GET  /auth/sessions    -> sesiones abiertas del propio usuario
+POST /auth/logout-all  -> cierra la sesión en todos los dispositivos
+```
+
+De la tabla `refresh_tokens` solo sale el **SHA-256** del secreto, nunca el secreto: quien lea la
+tabla no puede suplantar a nadie, igual que con `users.password_hash`. No se usa bcrypt aquí porque
+son 384 bits aleatorios, no una frase elegida por una persona: no hay diccionario que aplicar y el
+coste deliberado de bcrypt solo añadiría latencia a cada refresco.
+
+Cada refresh token es de **un solo uso**: al canjearlo se revoca y se emite otro (*rotación*). Si
+reaparece un token ya rotado, existen dos copias en circulación y no hay forma de saber cuál es la
+legítima, así que **se revocan todas las sesiones del usuario** y se obliga a iniciar sesión de
+nuevo. Es la respuesta estándar ante un robo de credenciales.
+
+También se revocan todas las sesiones al **cambiar la contraseña** (si alguien la conocía, dejar sus
+sesiones abiertas haría inútil el cambio) y al **dar de baja un usuario**. Un usuario desactivado
+tampoco puede renovar: `refresh` vuelve a comprobar que siga activo.
+
+El access token ya emitido **sigue siendo válido hasta que expire**, incluso tras un logout: un JWT
+firmado no se puede invalidar. De ahí que `JWT_EXPIRES_IN` sea corto y la sesión larga la sostenga
+el refresh token, que sí es revocable.
 
 ### RBAC en código de aplicación
 
@@ -371,11 +415,15 @@ confirmada. El `password_hash` jamás llega a `audit_logs`.
 
 ## API
 
+> Para construir el frontend, la referencia completa está en **[API.md](API.md)**: convenciones,
+> flujo de sesión, permisos por rol, cuerpos de request y response de cada endpoint, máquinas de
+> estado y reglas de negocio que la interfaz debe anticipar.
+
 Todo cuelga de `/api/v1`.
 
 | Recurso | Endpoints |
 |---|---|
-| `/auth` | `POST /login` · `GET /me` · `POST /change-password` |
+| `/auth` | `POST /login` · `POST /refresh` · `POST /logout` · `GET /me` · `GET /sessions` · `POST /logout-all` · `POST /change-password` |
 | `/users` | `GET /roles` · CRUD · `POST /:id/reset-password` |
 | `/catalogs` | `GET /` (monedas, tipos de documento, métodos de pago, categorías de gasto) · `POST /expense-categories` |
 | `/vehicle-brands`, `/vehicle-models` | listar · crear · actualizar |
@@ -409,7 +457,7 @@ curl -s "http://localhost:3000/api/v1/vehicles?status=in_inventory&page=1" -H "a
 npm test
 ```
 
-El módulo `vehicles` está cubierto con tests unitarios de sus casos de uso como muestra del patrón a
+60 pruebas unitarias. El módulo `vehicles` está cubierto por completo como muestra del patrón a
 replicar en los demás módulos (`tests/vehicles/`, 40 pruebas):
 
 - máquina de estados y disponibilidad comercial del vehículo;
@@ -420,7 +468,14 @@ replicar en los demás módulos (`tests/vehicles/`, 40 pruebas):
 - `delete-vehicle`: bloqueo de vendidos y reservados;
 - imágenes: promoción automática de portada.
 
-Los repositorios se sustituyen por dobles en memoria (`tests/helpers/fake-vehicle-repository.ts`),
+A eso se suman las reglas transversales añadidas después (20 pruebas):
+
+- `tests/shared/money.test.ts` — conversión a moneda de reporte y coherencia moneda/tasa;
+- `tests/users/refresh-token.entity.test.ts` — vigencia y revocación de un refresh token;
+- `tests/users/refresh-session.use-case.test.ts` — rotación, detección de reutilización, sesiones
+  independientes por dispositivo, corte de sesión de un usuario desactivado y logout idempotente.
+
+Los repositorios se sustituyen por dobles en memoria (`tests/helpers/`),
 que verifican el **efecto observable** (qué queda guardado, con qué estado) en lugar de la secuencia
 exacta de llamadas: así los tests no se rompen ante una refactorización que no cambia el
 comportamiento.
@@ -429,53 +484,89 @@ comportamiento.
 
 ## Decisiones que conviene conocer
 
-### `sales.vehicle_id UNIQUE` y las ventas canceladas
+### Cambios sobre el esquema entregado
 
-El `UNIQUE` de `sales.vehicle_id` **no tiene condición**: mientras exista la fila —aunque la venta
-esté `cancelled` o marcada con `deleted_at`— ese vehículo no puede volver a venderse. Consecuencia:
+Las tres decisiones que este README dejaba abiertas están **aplicadas**. Cada una tiene su propia
+migración, reversible con `npm run db:migrate:down`.
 
-- `cancel-sale` devuelve el vehículo a `in_inventory`, pero **no lo deja revendible**.
-- Para revenderlo hay que eliminar la venta cancelada: `DELETE /sales/:id`, que solo acepta ventas
-  en estado `cancelled` y hace un **borrado físico** (sus pagos se van en cascada). Es el único
-  borrado físico del sistema, y por eso `sales` no usa borrado lógico.
+#### 1. Índice único parcial en `sales` (migración 003)
 
-**Propuesta (no aplicada)**: sustituir el `UNIQUE` por un índice único parcial que ignore las
-canceladas, lo que permitiría conservar el histórico y revender sin borrar nada:
+El `UNIQUE` original de `sales.vehicle_id` no tenía condición: una venta cancelada seguía ocupando
+el vehículo y este no podía volver a venderse nunca. Se sustituyó por:
 
 ```sql
-ALTER TABLE sales DROP CONSTRAINT sales_vehicle_id_key;
 CREATE UNIQUE INDEX uq_sales_vehicle_active
   ON sales(vehicle_id)
   WHERE status <> 'cancelled' AND deleted_at IS NULL;
 ```
 
-No se aplicó para no modificar el esquema entregado. Queda a decisión del equipo.
+El índice expresa la regla real del negocio —*un vehículo no puede tener dos ventas **vigentes** a la
+vez*— sin sacrificar el historial. Consecuencias:
 
-### Refresh tokens: propuestos, no implementados
+- **Cancelar una venta ya deja el vehículo revendible.** Antes había que borrarla físicamente.
+- **Desaparece el único borrado físico del sistema.** `DELETE /sales/:id` volvió a ser un borrado
+  lógico y solo archiva ventas ya canceladas; sus pagos siguen siendo consultables.
+- `SaleRepository.isVehicleSold` filtra con **los mismos predicados que el índice**. Si divergieran,
+  el dominio dejaría pasar casos que la base rechazaría con un 500.
 
-El sistema emite **solo access tokens** de vida corta. El esquema no incluye una tabla donde
-almacenar refresh tokens y la consigna es no inventar tablas, así que la propuesta queda planteada:
+#### 2. Tabla `refresh_tokens` (migración 004)
 
-```sql
-CREATE TABLE refresh_tokens (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash VARCHAR(255) NOT NULL UNIQUE,  -- SHA-256 del token, nunca el token
-  expires_at TIMESTAMPTZ NOT NULL,
-  revoked_at TIMESTAMPTZ,
-  user_agent VARCHAR(255),
-  ip_address VARCHAR(45),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
+Implementada tal como se propuso, con rotación y detección de reutilización. Ver
+[Sesiones y rotación](#sesiones-y-rotación).
+
+#### 3. Moneda única de reporte
+
+**Criterio contable adoptado:** los importes se consolidan en **pesos dominicanos** usando la tasa
+registrada **en cada documento**, no una tasa del día de la consulta.
+
+Es el criterio de costo histórico: una unidad comprada a 58.00 y otra a 62.50 costaron lo que
+costaron, y su margen no debe moverse cada vez que fluctúa el dólar. Además es el único cálculo
+reproducible — dos consultas al mismo vehículo en fechas distintas devuelven el mismo número, y ese
+número cuadra con lo que la empresa efectivamente pagó.
+
+Convención de `exchange_rate` en todo el sistema: **cuántos pesos vale una unidad de la moneda del
+documento**. Un documento en pesos lleva tasa 1 (el `DEFAULT` de las tres columnas); una compra en
+dólares a 60.50 lleva `60.5000`. El dominio rechaza con 422 un documento en DOP con tasa distinta
+de 1, porque convertiría pesos en pesos y falsearía los totales.
+
+`GET /expenses/vehicle-cost/:vehicleId` devuelve cada importe en su moneda original **y** su
+equivalente en pesos:
+
+```
+importación   12,450.00 USD @ 60.5  ->    753,225.00 DOP
+gastos       145,000.00 DOP         ->    145,000.00 DOP
+gastos           300.00 USD @ 61.0  ->     18,300.00 DOP
+COSTO TOTAL                         ->    916,525.00 DOP
+vendido    1,800,000.00 DOP         ->  1,800,000.00 DOP
+MARGEN                              ->    883,475.00 DOP  (96.39 %)
 ```
 
-Permitiría sesiones largas sin ampliar la vigencia del access token y cerrar sesión del lado del
-servidor. **Requiere aprobación antes de añadirse.**
+Solo los campos con sufijo `Converted` son sumables entre sí. `GET /sales/summary` aplica el mismo
+criterio y declara su `reportingCurrency`.
 
-Mientras tanto, como el token lleva el rol dentro, un cambio de rol no surte efecto hasta que
-expira: de ahí la vigencia corta de `JWT_EXPIRES_IN`.
+> **`vehicles.sale_price` no tiene moneda** asociada en el esquema. Se interpreta como precio de
+> lista en la moneda de reporte. Si la empresa publica precios en dólares habría que añadirle un
+> `currency_id`; se dejó como está por ser un precio sugerido y no un importe contable.
+
+##### Adición requerida: `expenses.exchange_rate` (migración 005)
+
+> **Esta columna no estaba en el esquema entregado ni entre las propuestas anteriores.**
+
+El costo real suma tres orígenes y solo dos traían su tasa: `purchases.exchange_rate` y
+`sales.exchange_rate` ya existían, pero `expenses` guardaba `currency_id` **sin tasa**, de modo que
+un gasto en dólares no se podía convertir sin inventar un valor — y el "costo total" habría sido una
+suma de monedas distintas, que no significa nada.
+
+La forma es idéntica a la de las otras dos (`NUMERIC(10,4)`, `NOT NULL`, `DEFAULT 1`), así que las
+filas existentes, registradas en pesos, quedan correctas sin tocarlas.
+
+##### Regla nueva: el pago se registra en la moneda de la venta
+
+`sale_payments` guarda `currency_id` pero **no** una tasa propia, así que sumar un abono en dólares
+con uno en pesos daba un saldo sin sentido — un descuadre latente que existía desde el principio.
+Se cerró con una regla de negocio en vez de con otra columna: el abono debe registrarse en la moneda
+de la venta (422 si no coincide). Si el cliente paga en otra divisa, la conversión la hace la caja
+al recibir, no el sistema al sumar.
 
 ### Categorías de gasto sembradas
 
@@ -494,25 +585,25 @@ esquema, y pueden editarse o desactivarse desde el catálogo.
 
 Ver `src/infrastructure/database/pg-types.ts`.
 
-### Costos en moneda mixta
-
-`GET /expenses/vehicle-cost/:vehicleId` suma el costo de importación y los gastos **en su moneda
-original**. La empresa compra en USD y vende en DOP, con tasas que se registran por documento
-(`purchases.exchange_rate`, `sales.exchange_rate`); la conversión a una moneda única de reporte no
-está implementada y debería definirse con el área contable antes de codificarla.
-
----
-
 ## Estado de verificación
 
 Comprobado contra una base PostgreSQL real:
 
-- las dos migraciones aplican (20 tablas de negocio, 20 triggers de `updated_at`) y el seed crea el
-  administrador;
-- el ciclo comercial completo funciona de punta a punta: marca → modelo → vehículo → proveedor →
-  compra → recepción a inventario → cliente → cotización → reserva → venta → pagos → cierre;
-- las reglas de negocio devuelven el código correcto (409 en duplicados y `UNIQUE`, 422 en
-  transiciones inválidas, saldos excedidos y `scope` incoherente, 400 en errores de forma);
+- las **cinco** migraciones aplican en orden y el seed crea el administrador; el `UNIQUE` de
+  `sales.vehicle_id` queda sustituido por `uq_sales_vehicle_active` y el único `UNIQUE` que
+  permanece en `sales` es el de `sale_number`;
+- el ciclo comercial completo funciona de punta a punta: marca → vehículo → proveedor → compra →
+  recepción a inventario → cliente → cotización → reserva → venta → pagos → cierre;
+- **reventa tras cancelación**: cancelar una venta devuelve el vehículo a inventario y permite
+  registrar una venta nueva sobre él **sin borrar nada**; las dos ventas conviven en el historial;
+- **sesiones**: el login entrega ambos tokens, `refresh` rota el secreto, reutilizar un token ya
+  rotado devuelve 401 y cierra todas las sesiones, `logout` invalida el token y `logout-all` cierra
+  las sesiones simultáneas;
+- **moneda**: una compra en USD @ 60.50 más gastos en DOP y en USD @ 61.00 consolidan en
+  916 525.00 DOP, verificado contra el cálculo a mano; un documento en DOP con tasa ≠ 1 y un pago en
+  moneda distinta a la de la venta devuelven 422;
+- las reglas de negocio devuelven el código correcto (409 en duplicados, 422 en transiciones
+  inválidas, saldos excedidos, `scope` incoherente y tasas incoherentes, 400 en errores de forma);
 - RBAC bloquea a `ventas` la creación de vehículos y la administración de usuarios;
-- `audit_logs` se llena solo, en 15 combinaciones de tabla/acción, sin `password_hash`;
-- `npm run typecheck`, `npm run build` y `npm test` (40 pruebas) pasan en limpio.
+- `audit_logs` se llena solo, sin `password_hash`;
+- `npm run typecheck`, `npm run build` y `npm test` (60 pruebas) pasan en limpio.

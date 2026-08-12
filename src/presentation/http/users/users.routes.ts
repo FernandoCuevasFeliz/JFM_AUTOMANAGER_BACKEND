@@ -11,20 +11,37 @@ import {
   createUserSchema,
   listUsersQuerySchema,
   loginSchema,
+  refreshSessionSchema,
   resetPasswordSchema,
   updateUserSchema,
 } from './users.schemas';
 
 /**
- * Rutas de autenticacion. `POST /auth/login` es el unico endpoint publico de
- * la API; todo lo demas exige token.
+ * Rutas de autenticacion.
+ *
+ * `POST /auth/login` y `POST /auth/refresh` son los unicos endpoints publicos:
+ * el refresco no puede exigir un access token valido, porque su razon de ser es
+ * justamente que el access token ya expiro. Lo que lo autoriza es el propio
+ * refresh token del cuerpo.
  */
 export function buildAuthRoutes(controller: UsersController, tokens: TokenService): Router {
   const router = Router();
 
   router.post('/login', validate({ body: loginSchema }), asyncHandler(controller.login));
 
+  router.post(
+    '/refresh',
+    validate({ body: refreshSessionSchema }),
+    asyncHandler(controller.refresh),
+  );
+
+  router.post('/logout', validate({ body: refreshSessionSchema }), asyncHandler(controller.logout));
+
   router.get('/me', authMiddleware(tokens), asyncHandler(controller.me));
+
+  router.get('/sessions', authMiddleware(tokens), asyncHandler(controller.sessions));
+
+  router.post('/logout-all', authMiddleware(tokens), asyncHandler(controller.logoutAll));
 
   router.post(
     '/change-password',

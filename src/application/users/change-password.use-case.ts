@@ -1,6 +1,7 @@
 import type { DomainError } from '../../domain/shared/domain-error';
 import { err, okVoid, type Result } from '../../domain/shared/result';
 import type { PasswordHasher } from '../../domain/users/password-hasher';
+import type { RefreshTokenRepository } from '../../domain/users/refresh-token.repository';
 import {
   InvalidCredentialsError,
   SamePasswordError,
@@ -24,6 +25,7 @@ export class ChangePasswordUseCase implements UseCase<ChangePasswordInput, void>
   constructor(
     private readonly users: UserRepository,
     private readonly passwordHasher: PasswordHasher,
+    private readonly refreshTokens: RefreshTokenRepository,
   ) {}
 
   async execute(input: ChangePasswordInput): Promise<Result<void, DomainError>> {
@@ -46,6 +48,11 @@ export class ChangePasswordUseCase implements UseCase<ChangePasswordInput, void>
 
     const passwordHash = await this.passwordHasher.hash(input.newPassword);
     await this.users.update(input.userId, { passwordHash });
+
+    // Cambiar la contrasena cierra la sesion en todos los dispositivos: si el
+    // motivo del cambio es que alguien la conocia, dejar sus sesiones abiertas
+    // haria inutil el cambio.
+    await this.refreshTokens.revokeAllForUser(input.userId);
 
     return okVoid();
   }

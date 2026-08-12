@@ -64,13 +64,17 @@ export class VehicleNotQuotableError extends BusinessRuleError {
   }
 }
 
-/** Refleja el UNIQUE de `sales.vehicle_id`: un vehiculo se vende una sola vez. */
+/**
+ * Refleja el indice unico parcial `uq_sales_vehicle_active`: un vehiculo no
+ * puede tener dos ventas vigentes a la vez. Si la venta anterior se cancela, el
+ * vehiculo vuelve a poder venderse.
+ */
 export class VehicleAlreadySoldError extends ConflictError {
   constructor(vehicleId: string) {
-    super('El vehiculo ya tiene una venta registrada. Un vehiculo solo se puede vender una vez', {
-      field: 'vehicleId',
-      vehicleId,
-    });
+    super(
+      'El vehiculo ya tiene una venta vigente. Cancele esa venta antes de registrar una nueva',
+      { field: 'vehicleId', vehicleId },
+    );
   }
 }
 

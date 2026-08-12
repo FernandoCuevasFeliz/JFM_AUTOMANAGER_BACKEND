@@ -1,5 +1,9 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
-import { CurrencyNotFoundError, PaymentMethodNotFoundError } from '../../domain/catalogs/catalog.errors';
+import {
+  CurrencyNotFoundError,
+  InconsistentExchangeRateError,
+  PaymentMethodNotFoundError,
+} from '../../domain/catalogs/catalog.errors';
 import { type Expense, isExpenseScopeConsistent } from '../../domain/expenses/expense.entity';
 import {
   ExpenseCategoryNotFoundError,
@@ -7,6 +11,7 @@ import {
 } from '../../domain/expenses/expense.errors';
 import type { ExpenseRepository } from '../../domain/expenses/expense.repository';
 import type { DomainError } from '../../domain/shared/domain-error';
+import { isExchangeRateConsistent } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import { VehicleNotFoundError } from '../../domain/vehicles/vehicle.errors';
 import type { VehicleRepository } from '../../domain/vehicles/vehicle.repository';
@@ -19,6 +24,8 @@ export interface CreateExpenseInput extends ActorInput {
   readonly paymentMethodId: string;
   readonly description: string;
   readonly amount: number;
+  /** Pesos por unidad de `currencyId`. 1 si el gasto ya esta en pesos. */
+  readonly exchangeRate: number;
   readonly expenseDate: string;
 }
 
@@ -51,8 +58,12 @@ export class CreateExpenseUseCase implements UseCase<CreateExpenseInput, Expense
       return err(new VehicleNotFoundError(input.vehicleId));
     }
 
-    if ((await this.catalog.findCurrencyById(input.currencyId)) === null) {
+    const currency = await this.catalog.findCurrencyById(input.currencyId);
+    if (currency === null) {
       return err(new CurrencyNotFoundError(input.currencyId));
+    }
+    if (!isExchangeRateConsistent(currency.code, input.exchangeRate)) {
+      return err(new InconsistentExchangeRateError(currency.code, input.exchangeRate));
     }
 
     if ((await this.catalog.findPaymentMethodById(input.paymentMethodId)) === null) {
@@ -66,6 +77,7 @@ export class CreateExpenseUseCase implements UseCase<CreateExpenseInput, Expense
       paymentMethodId: input.paymentMethodId,
       description: input.description.trim(),
       amount: input.amount,
+      exchangeRate: input.exchangeRate,
       expenseDate: input.expenseDate,
       createdBy: input.actorUserId,
     });

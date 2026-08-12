@@ -9,6 +9,8 @@ export interface Expense {
   readonly paymentMethodId: string;
   readonly description: string;
   readonly amount: number;
+  /** Pesos por unidad de `currencyId`. Ver `domain/shared/money.ts`. */
+  readonly exchangeRate: number;
   readonly expenseDate: string;
   readonly createdBy: string;
   readonly createdAt: Date;
@@ -32,6 +34,7 @@ export interface NewExpense {
   readonly paymentMethodId: string;
   readonly description: string;
   readonly amount: number;
+  readonly exchangeRate: number;
   readonly expenseDate: string;
   readonly createdBy: string;
 }
@@ -43,6 +46,7 @@ export interface ExpenseUpdate {
   readonly paymentMethodId?: string;
   readonly description?: string;
   readonly amount?: number;
+  readonly exchangeRate?: number;
   readonly expenseDate?: string;
 }
 
@@ -56,18 +60,54 @@ export function isExpenseScopeConsistent(scope: ExpenseScope, vehicleId: string 
   return scope === 'vehicle' ? vehicleId !== null : vehicleId === null;
 }
 
-/** Costo real acumulado de un vehiculo: importacion + gastos asociados. */
+/** Total de gastos de una moneda concreta, con su equivalente en reporte. */
+export interface ExpenseCurrencyTotal {
+  readonly currencyCode: string;
+  /** Suma en la moneda original. */
+  readonly total: number;
+  /** La misma suma llevada a la moneda de reporte. */
+  readonly totalConverted: number;
+}
+
+/**
+ * Costo real acumulado de un vehiculo: importacion + gastos asociados,
+ * contrastado con el precio al que se vendio.
+ *
+ * Los campos sin sufijo estan en la moneda original de cada documento; los que
+ * llevan `Converted` estan en `reportingCurrency` y son los unicos que se
+ * pueden sumar entre si.
+ */
 export interface VehicleCostSummary {
   readonly vehicleId: string;
+  readonly reportingCurrency: string;
+
+  // --- Importacion (`purchase_items` + la tasa de su compra) ---------------
+  readonly purchaseCurrencyCode: string | null;
+  readonly purchaseExchangeRate: number | null;
   readonly purchaseCost: number;
   readonly freightCost: number;
   readonly insuranceCost: number;
   readonly otherPurchaseCosts: number;
-  readonly expensesTotal: number;
-  readonly totalCost: number;
+  readonly importSubtotal: number;
+  readonly importSubtotalConverted: number;
+
+  // --- Gastos imputados al vehiculo ---------------------------------------
+  readonly expensesByCurrency: ExpenseCurrencyTotal[];
+  readonly expensesTotalConverted: number;
+
+  readonly totalCostConverted: number;
+
+  // --- Contraste con el precio --------------------------------------------
+  /**
+   * Precio de lista sugerido. `vehicles.sale_price` no tiene moneda asociada en
+   * el esquema; se interpreta en la moneda de reporte.
+   */
   readonly listPrice: number | null;
+  readonly saleCurrencyCode: string | null;
   readonly soldPrice: number | null;
-  /** Margen contra el precio de venta real; `null` si aun no se ha vendido. */
+  readonly soldPriceConverted: number | null;
+
+  /** Margen en moneda de reporte; `null` si aun no se ha vendido. */
   readonly margin: number | null;
   readonly marginPercentage: number | null;
 }
