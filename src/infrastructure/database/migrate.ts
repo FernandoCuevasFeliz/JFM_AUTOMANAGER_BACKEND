@@ -39,7 +39,9 @@ async function run(): Promise<void> {
     }
   }
 
-  if (!results || results.length === 0) {
+  // Solo cuando NO hubo error: si la conexion falla, `results` tambien viene
+  // vacio y anunciar "no habia pendientes" ocultaria la causa real del fallo.
+  if (error === undefined && (results === undefined || results.length === 0)) {
     logger.info('No habia migraciones pendientes');
   }
 

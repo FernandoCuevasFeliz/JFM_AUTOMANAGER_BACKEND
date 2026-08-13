@@ -1,0 +1,99 @@
+# =============================================================================
+# Stack local completo: PostgreSQL + migraciones + API.
+#
+#   docker compose up -d --build     levanta todo
+#   docker compose --profile seed up seed    crea el usuario administrador
+#   docker compose logs -f api       sigue el log de la API
+#   docker compose down              detiene todo (los datos sobreviven)
+#   docker compose down -v           detiene y BORRA los datos
+#
+# Para apuntar a una base externa (Supabase), no uses este archivo: ejecuta la
+# imagen directamente. Ver la sección de Docker en el README.
+# =============================================================================
+
+name: jfm-automanager
+
+services:
+  # ---------------------------------------------------------------------------
+  # Base de datos
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jfm
+      POSTGRES_PASSWORD: jfm_local_dev
+      POSTGRES_DB: ejgh_autoimport
+    ports:
+      # 5433 en el host para no chocar con un PostgreSQL ya instalado en la
+      # máquina. Dentro de la red de compose el puerto sigue siendo 5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `migrate` espera a que esto pase: sin ello, las migraciones arrancarían
+      # contra una base que todavía se está inicializando.
+      test: ["CMD-SHELL", "pg_isready -U jfm -d ejgh_autoimport"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Migraciones — contenedor de un solo uso
+  #
+  # Va en un servicio aparte y no en el arranque de la API a propósito: si la
+  # API migrara al arrancar, dos réplicas competirían por aplicar el mismo
+  # cambio de esquema. Aquí corre una vez, termina, y solo entonces arranca la
+  # API.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+    image: jfm-automanager-backend:latest
+    env_file: [.env.docker]
+    command: ["node", "dist/infrastructure/database/migrate.js", "up"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+    image: jfm-automanager-backend:latest
+    env_file: [.env.docker]
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Usuario administrador inicial — bajo perfil, no corre solo
+  #
+  #   docker compose --profile seed up seed
+  #
+  # Es idempotente (si el correo ya existe no hace nada), pero se deja manual
+  # para que crear credenciales sea siempre un acto deliberado.
+  # ---------------------------------------------------------------------------
+  seed:
+    build:
+      context: .
+    image: jfm-automanager-backend:latest
+    env_file: [.env.docker]
+    command: ["node", "dist/infrastructure/database/seed.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles: ["seed"]
+    restart: "no"
+
+volumes:
+  pgdata:

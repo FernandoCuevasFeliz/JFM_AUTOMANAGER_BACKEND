@@ -1,0 +1,40 @@
+# Todo lo que NO debe entrar al contexto de build.
+# Cuanto menos se copie, más rápido construye y menos riesgo de filtrar secretos.
+
+# Dependencias: se instalan dentro de la imagen, para la arquitectura correcta.
+# Copiar el node_modules del host rompería `bcrypt`, que es un módulo nativo
+# compilado contra el sistema donde se instaló.
+node_modules
+**/node_modules
+
+# Artefactos de compilación: la imagen los genera desde cero.
+dist
+coverage
+
+# SECRETOS: nunca deben quedar horneados en una capa de la imagen. Las
+# variables se pasan en tiempo de ejecución (`env_file` / `--env-file`).
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Control de versiones y herramientas
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Pruebas y documentación: no hacen falta para ejecutar la API
+tests
+vitest.config.mts
+*.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Basura del sistema
+*.log
+.DS_Store

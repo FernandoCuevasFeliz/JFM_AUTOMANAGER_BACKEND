@@ -33,7 +33,16 @@ No se usa ORM. El dominio no conoce el esquema: los repositorios traducen entre 
 npm install
 ```
 
-Requisitos: Node.js 20 o superior y PostgreSQL 14 o superior.
+Requisitos: **Node.js 22** y PostgreSQL 14 o superior.
+
+La versión exacta está fijada en `.nvmrc`. Con [nvm](https://github.com/nvm-sh/nvm):
+
+```bash
+nvm use
+```
+
+Es la misma versión que usa la imagen de Docker, así que lo que pruebas en local
+es lo que corre en el contenedor.
 
 ### Variables de entorno
 
@@ -167,6 +176,104 @@ Tres detalles del diseño:
 Los objetos `req`/`res` completos que adjunta `pino-http` se ocultan **solo en la salida legible**
 (`ignore` de `pino-pretty`). En producción la salida es JSON y conserva todos los campos para el
 agregador de logs. Con `LOG_LEVEL=debug` se ve además cada consulta SQL.
+
+---
+
+## Docker
+
+```bash
+cp .env.docker.example .env.docker    # y cambia JWT_SECRET
+docker compose up -d --build          # PostgreSQL + migraciones + API
+docker compose --profile seed up seed # usuario administrador inicial
+```
+
+La API queda en `http://localhost:3000/api/v1`. PostgreSQL se publica en el
+**5433** del host (no el 5432) para no chocar con una instalación local.
+
+| Comando | Qué hace |
+|---|---|
+| `docker compose logs -f api` | sigue el log de la API |
+| `docker compose ps` | estado y salud de los servicios |
+| `docker compose down` | detiene todo; **los datos sobreviven** |
+| `docker compose down -v` | detiene y **borra** el volumen de la base |
+| `docker compose run --rm migrate` | reaplica migraciones pendientes |
+
+### Qué hay dentro
+
+**`Dockerfile`** — build en tres etapas. La imagen final contiene únicamente el
+JavaScript compilado y las dependencias de producción: sin TypeScript, sin
+`tsx`, sin `pino-pretty`, sin el código fuente y sin las herramientas de
+compilación de C++. Corre como el usuario `node`, sin privilegios.
+
+Dos decisiones que conviene conocer:
+
+- **Sin herramientas de compilación.** `bcrypt` es un módulo nativo, pero su
+  versión 6 trae binarios precompilados para linux-x64 y linux-arm64 en
+  variantes glibc **y** musl, y `node-gyp-build` se limita a elegir el correcto.
+  Ninguna otra dependencia de producción tiene scripts de instalación, así que
+  la imagen no necesita `python3`/`make`/`g++`. Por lo mismo, cambiar
+  `NODE_VERSION` a `22.23.2-alpine` funciona si quieres una imagen más pequeña;
+  se deja Debian por ser la opción más conservadora.
+- **Versión de Node fijada** (`22.23.2`, la misma de `.nvmrc`), no un tag
+  flotante: dos builds separados en el tiempo producen la misma imagen.
+- **`NODE_ENV=production` está fijado en la imagen.** El logger solo carga
+  `pino-pretty` cuando el entorno no es producción, y esa librería es una
+  dependencia de desarrollo que no está instalada. Cambiar esa variable dentro
+  del contenedor haría fallar el arranque; la salida en el contenedor es JSON,
+  una línea por evento.
+
+**`docker-compose.yml`** — cuatro servicios: `db`, `migrate`, `api` y `seed`.
+
+Las migraciones corren en un **contenedor de un solo uso** y no en el arranque
+de la API. Si la API migrara al iniciarse, dos réplicas competirían por aplicar
+el mismo cambio de esquema. El orden lo garantizan las condiciones de
+`depends_on`: `migrate` espera a que PostgreSQL responda a `pg_isready`, y `api`
+espera a que `migrate` termine con éxito.
+
+`seed` está bajo un perfil, así que no corre solo: crear credenciales debe ser
+un acto deliberado.
+
+**Healthcheck** — el del contenedor sondea `/health` (¿vive el proceso?) y no
+`/health/ready`, porque si dependiera de la base un corte momentáneo marcaría el
+contenedor como enfermo y podría provocar reinicios en cadena. Para *readiness*
+en un orquestador, sondea `/health/ready`, que sí verifica PostgreSQL.
+
+No hay gestor de init (`tini`/`dumb-init`): `server.ts` ya maneja `SIGTERM` y
+`SIGINT` cerrando el pool ordenadamente, que es exactamente lo que envía
+`docker stop`.
+
+### Contra una base externa (Supabase)
+
+El `docker-compose.yml` levanta su propio PostgreSQL. Para usar una base
+gestionada, no uses compose: ejecuta la imagen directamente.
+
+```bash
+docker build -t jfm-automanager-backend .
+docker run --rm --env-file .env jfm-automanager-backend \
+  node dist/infrastructure/database/migrate.js up
+docker run -d -p 3000:3000 --env-file .env --name jfm-api jfm-automanager-backend
+```
+
+Recuerda `DB_SSL=true` para proveedores gestionados.
+
+### Scripts en el contenedor
+
+Los `npm run db:*` usan `tsx`, que es una dependencia de desarrollo y no existe
+en la imagen. Para el contenedor están sus equivalentes compilados:
+
+| Desarrollo | Producción / contenedor |
+|---|---|
+| `npm run db:migrate` | `npm run db:migrate:prod` |
+| `npm run db:migrate:down` | `npm run db:migrate:down:prod` |
+| `npm run db:seed` | `npm run db:seed:prod` |
+
+### `.env` frente a `.env.docker`
+
+Son dos archivos distintos a propósito. `.env` apunta a la base que usas desde
+tu máquina; `.env.docker` apunta al servicio `db` de la red interna de compose
+(host `db`, puerto `5432`). Mezclarlos haría que las migraciones corrieran
+contra la base equivocada. Ninguno de los dos entra en la imagen: están en
+`.dockerignore` y se inyectan en tiempo de ejecución.
 
 ---
 
