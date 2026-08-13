@@ -242,6 +242,58 @@ No hay gestor de init (`tini`/`dumb-init`): `server.ts` ya maneja `SIGTERM` y
 `SIGINT` cerrando el pool ordenadamente, que es exactamente lo que envía
 `docker stop`.
 
+### Despliegue en Railway
+
+Railway detecta el `Dockerfile` y lo construye solo. Lo que **no** hace solo es
+darte las variables: `.env` está en `.dockerignore` a propósito, así que la
+imagen viaja sin secretos y el contenedor arranca sin ninguna variable.
+
+En el servicio → **Variables**:
+
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | *(ver tabla siguiente)* |
+| `JWT_SECRET` | mínimo 32 caracteres |
+| `DB_SSL` | *(ver tabla siguiente)* |
+| `CORS_ORIGINS` | el dominio del frontend, no `*` |
+| `IMAGEKIT_PUBLIC_KEY` / `IMAGEKIT_PRIVATE_KEY` | solo si se usa la subida de imágenes |
+
+Solo `DATABASE_URL` y `JWT_SECRET` son obligatorias; el resto tiene valores por
+defecto razonables. Si falta alguna, el proceso sale con código 1 y escribe qué
+falta, sin stack trace.
+
+| Base de datos | `DATABASE_URL` | `DB_SSL` |
+|---|---|---|
+| PostgreSQL de Railway (red interna) | `${{Postgres.DATABASE_URL}}` | `false` |
+| PostgreSQL de Railway (proxy público) | cadena `*.proxy.rlwy.net` | `true` |
+| Supabase | cadena del *session pooler* | `true` |
+
+`${{Postgres.DATABASE_URL}}` es una **variable de referencia** de Railway: se
+escribe tal cual y Railway la resuelve al valor del servicio de PostgreSQL. La
+red interna (`*.railway.internal`) no usa TLS, de ahí el `false`.
+
+**No configures `PORT`.** Railway lo inyecta y el código ya lo lee; fijarlo a
+mano rompe el enrutado.
+
+#### Migraciones
+
+El contenedor no migra al arrancar (ver más arriba el porqué). Tienes dos vías:
+
+```bash
+# A) Puntual, desde tu máquina, contra la base de Railway
+railway run node dist/infrastructure/database/migrate.js up
+railway run node dist/infrastructure/database/seed.js      # solo la primera vez
+```
+
+```bash
+# B) En cada despliegue: cambia el Start Command del servicio por
+node dist/infrastructure/database/migrate.js up && node dist/main/server.js
+```
+
+La opción B es cómoda con **una sola réplica**. Si algún día escalas a varias,
+vuelve a la A: dos instancias arrancando a la vez competirían por aplicar el
+mismo cambio de esquema.
+
 ### Contra una base externa (Supabase)
 
 El `docker-compose.yml` levanta su propio PostgreSQL. Para usar una base

@@ -57,7 +57,28 @@ function buildEnv(): Env {
     const detail = parsed.error.issues
       .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
       .join('\n');
-    throw new Error(`Variables de entorno invalidas:\n${detail}`);
+
+    // Se escribe el diagnostico y se sale con codigo 1 en lugar de lanzar. Un
+    // `throw` aqui ocurre al cargar el modulo, asi que Node imprime un stack
+    // trace de su cargador de modulos que no aporta nada (el fallo no esta en
+    // el codigo, sino en la configuracion) y que en plataformas como Railway
+    // aparece entrelazado con la salida de otros procesos, enterrando el unico
+    // dato util: que variable falta.
+    process.stderr.write(
+      [
+        '',
+        'No se pudo iniciar: la configuracion de entorno es invalida.',
+        '',
+        detail,
+        '',
+        'Defina esas variables en el entorno del proceso. En un despliegue',
+        '(Railway, Render, Fly...) se configuran en el panel del servicio: el',
+        'archivo .env NO viaja dentro de la imagen. Ver .env.example.',
+        '',
+      ].join('\n'),
+    );
+
+    process.exit(1);
   }
 
   const raw = parsed.data;
