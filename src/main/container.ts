@@ -104,6 +104,7 @@ import { KyselyUserRepository } from '../infrastructure/repositories/kysely-user
 import { KyselyVehicleCatalogRepository } from '../infrastructure/repositories/kysely-vehicle-catalog.repository';
 import { KyselyVehicleRepository } from '../infrastructure/repositories/kysely-vehicle.repository';
 import { SystemClock } from '../infrastructure/system-clock';
+import { ImageKitSigner } from '../infrastructure/uploads/imagekit-signer';
 import { CatalogsController } from '../presentation/http/catalogs/catalogs.controller';
 import { ClientsController } from '../presentation/http/clients/clients.controller';
 import { ExpensesController } from '../presentation/http/expenses/expenses.controller';
@@ -112,6 +113,7 @@ import { QuotationsController } from '../presentation/http/quotations/quotations
 import { ReservationsController } from '../presentation/http/reservations/reservations.controller';
 import { SalesController } from '../presentation/http/sales/sales.controller';
 import { SuppliersController } from '../presentation/http/suppliers/suppliers.controller';
+import { UploadsController } from '../presentation/http/uploads/uploads.controller';
 import { UsersController } from '../presentation/http/users/users.controller';
 import { VehiclesController } from '../presentation/http/vehicles/vehicles.controller';
 
@@ -139,6 +141,7 @@ export interface Container {
     readonly reservations: ReservationsController;
     readonly sales: SalesController;
     readonly catalogs: CatalogsController;
+    readonly uploads: UploadsController;
   };
   shutdown(): Promise<void>;
 }
@@ -495,6 +498,14 @@ export function buildContainer(): Container {
     ),
   });
 
+  const uploadsController = new UploadsController({
+    imageKitSigner: new ImageKitSigner({
+      privateKey: env.IMAGEKIT_PRIVATE_KEY,
+      publicKey: env.IMAGEKIT_PUBLIC_KEY,
+      expirySeconds: env.IMAGEKIT_AUTH_EXPIRY_SECONDS,
+    }),
+  });
+
   return {
     db,
     pool,
@@ -511,6 +522,7 @@ export function buildContainer(): Container {
       reservations: reservationsController,
       sales: salesController,
       catalogs: catalogsController,
+      uploads: uploadsController,
     },
     async shutdown() {
       await db.destroy();

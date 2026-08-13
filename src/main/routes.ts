@@ -9,6 +9,7 @@ import { buildQuotationsRoutes } from '../presentation/http/quotations/quotation
 import { buildReservationsRoutes } from '../presentation/http/reservations/reservations.routes';
 import { buildSalesRoutes } from '../presentation/http/sales/sales.routes';
 import { buildSuppliersRoutes } from '../presentation/http/suppliers/suppliers.routes';
+import { buildUploadsRoutes } from '../presentation/http/uploads/uploads.routes';
 import { buildAuthRoutes, buildUsersRoutes } from '../presentation/http/users/users.routes';
 import {
   buildVehicleBrandRoutes,
@@ -46,6 +47,7 @@ export function buildRouter(container: Container): Router {
   protectedRoutes.use('/quotations', buildQuotationsRoutes(controllers.quotations));
   protectedRoutes.use('/reservations', buildReservationsRoutes(controllers.reservations));
   protectedRoutes.use('/sales', buildSalesRoutes(controllers.sales));
+  protectedRoutes.use('/uploads', buildUploadsRoutes(controllers.uploads));
 
   router.use(protectedRoutes);
 

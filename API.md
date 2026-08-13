@@ -517,7 +517,8 @@ está sujeto a la máquina de estados.
 ```
 
 **Imágenes.** El backend solo guarda la **URL**: no recibe archivos ni hace subidas. Sube el archivo
-a donde corresponda (S3, Cloudinary, tu propio servicio) y manda aquí la URL resultante.
+a donde corresponda (ImageKit, S3, Cloudinary) y manda aquí la URL resultante. Si usas ImageKit,
+[§5.12](#512-firma-de-subidas) explica cómo obtener la firma que exige su subida directa.
 
 ```jsonc
 // POST /vehicles/:id/images
@@ -837,6 +838,37 @@ la venta sola**: quedar saldada y entregar la unidad son dos momentos distintos 
 Los totales están consolidados en pesos con la tasa de cada venta, así que ventas en dólares y en
 pesos son sumables entre sí.
 
+### 5.12 Firma de subidas
+
+| Método | Ruta | Permiso |
+|---|---|---|
+| `GET` | `/uploads/imagekit-auth` | `vehicles:write` |
+
+El backend **sigue sin recibir archivos**: el navegador los sube directamente a ImageKit. Pero esa
+subida directa exige tres parámetros que solo puede calcular el servidor, porque se derivan de la
+clave **privada** de la cuenta, que nunca debe llegar al cliente.
+
+```jsonc
+// GET /uploads/imagekit-auth → 200
+{ "data": {
+  "token": "013041a2-a52f-4cd6-86f4-8eebc9071a48",  // identificador de la subida
+  "expire": 1786561568,                              // epoch en segundos
+  "signature": "6c5e1f45…",                          // HMAC-SHA1 de (token + expire)
+  "publicKey": "public_xxx"                          // solo si está configurada
+} }
+```
+
+Pide la firma **justo antes de cada subida**: es de un solo uso y caduca (40 minutos por defecto,
+configurable con `IMAGEKIT_AUTH_EXPIRY_SECONDS`, máximo una hora). La respuesta viaja con
+`Cache-Control: no-store`.
+
+Exige `vehicles:write` porque hoy las subidas son fotos de unidades. Sin ese candado, cualquiera con
+la URL podría pedir firmas ilimitadas y subir archivos a la cuenta de la empresa.
+
+Si el servidor no tiene `IMAGEKIT_PRIVATE_KEY` en su entorno, la ruta responde `500 INTERNAL_ERROR`
+con un mensaje explícito: es un fallo de despliegue, no del cliente. El frontend detecta esa
+situación por configuración propia y cae a su modo "pegar URL".
+
 ---
 
 ## 6. Estados y transiciones
@@ -1053,7 +1085,9 @@ hay que listar el origen del frontend explícitamente, separado por comas.
 
 ### Notas para desarrollo
 
-- El backend **no sirve archivos estáticos ni recibe subidas**: las imágenes se guardan como URL.
+- El backend **no sirve archivos estáticos ni recibe subidas**: las imágenes se guardan como URL. Lo
+  único que aporta al proceso es la firma de [§5.12](#512-firma-de-subidas), que es un cálculo sobre
+  una clave de configuración; el archivo nunca pasa por aquí.
 - El log del servidor imprime una línea por petición con método, ruta, código y tiempo, incluyendo el
   código de error de negocio. Útil para depurar el cliente contra la consola del backend.
 - Con `LOG_LEVEL=debug` se ve además cada consulta SQL.
