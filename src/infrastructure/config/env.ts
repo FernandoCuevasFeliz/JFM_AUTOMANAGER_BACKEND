@@ -50,6 +50,56 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema> & { corsOrigins: string[] | '*' };
 
+/**
+ * Diagnostico para cuando la configuracion falla en un despliegue.
+ *
+ * Distingue las tres causas que se confunden entre si desde los logs:
+ *   - no llego NINGUNA variable  -> se configuraron en otro servicio o en otro
+ *     entorno del panel;
+ *   - llego alguna pero no la que falta -> el nombre tiene una errata;
+ *   - llego con un nombre parecido -> lo senala explicitamente.
+ *
+ * Solo se imprimen NOMBRES y longitudes, nunca valores: este texto acaba en los
+ * logs de la plataforma, que suelen ser legibles por todo el equipo.
+ */
+function describeReceivedEnv(): string {
+  const esperadas = Object.keys(envSchema.shape);
+  const recibidas = Object.keys(process.env);
+
+  const presentes = esperadas.filter((name) => {
+    const value = process.env[name];
+    return value !== undefined && value !== '';
+  });
+
+  const lineas = [
+    'Diagnostico (solo nombres, sin valores):',
+    `  - variables recibidas por el proceso: ${recibidas.length}`,
+    `  - reconocidas por la app: ${presentes.length === 0 ? '(ninguna)' : presentes.join(', ')}`,
+  ];
+
+  // Nombres parecidos a los esperados: delatan erratas y variantes en minusculas.
+  const parecidas = recibidas.filter((name) => {
+    if (esperadas.includes(name)) {
+      return false;
+    }
+    const normalizado = name.toUpperCase().replace(/[^A-Z]/g, '');
+    return esperadas.some((e) => e.replace(/[^A-Z]/g, '') === normalizado);
+  });
+
+  if (parecidas.length > 0) {
+    lineas.push(`  - OJO, nombres parecidos pero distintos: ${parecidas.join(', ')}`);
+  }
+
+  if (presentes.length === 0) {
+    lineas.push(
+      '  - No llego ninguna variable de la aplicacion. Revise que esten',
+      '    definidas en ESTE servicio y en ESTE entorno del panel.',
+    );
+  }
+
+  return lineas.join('\n');
+}
+
 function buildEnv(): Env {
   const parsed = envSchema.safeParse(process.env);
 
@@ -74,6 +124,8 @@ function buildEnv(): Env {
         'Defina esas variables en el entorno del proceso. En un despliegue',
         '(Railway, Render, Fly...) se configuran en el panel del servicio: el',
         'archivo .env NO viaja dentro de la imagen. Ver .env.example.',
+        '',
+        describeReceivedEnv(),
         '',
       ].join('\n'),
     );
