@@ -4,6 +4,7 @@ import { auditContextMiddleware } from '../presentation/middlewares/audit-contex
 import { buildCatalogsRoutes } from '../presentation/http/catalogs/catalogs.routes';
 import { buildClientsRoutes } from '../presentation/http/clients/clients.routes';
 import { buildExpensesRoutes } from '../presentation/http/expenses/expenses.routes';
+import { buildInvoicesRoutes } from '../presentation/http/invoices/invoices.routes';
 import { buildPurchasesRoutes } from '../presentation/http/purchases/purchases.routes';
 import { buildQuotationsRoutes } from '../presentation/http/quotations/quotations.routes';
 import { buildReservationsRoutes } from '../presentation/http/reservations/reservations.routes';
@@ -47,6 +48,7 @@ export function buildRouter(container: Container): Router {
   protectedRoutes.use('/quotations', buildQuotationsRoutes(controllers.quotations));
   protectedRoutes.use('/reservations', buildReservationsRoutes(controllers.reservations));
   protectedRoutes.use('/sales', buildSalesRoutes(controllers.sales));
+  protectedRoutes.use('/invoices', buildInvoicesRoutes(controllers.invoices));
   protectedRoutes.use('/uploads', buildUploadsRoutes(controllers.uploads));
 
   router.use(protectedRoutes);

@@ -24,6 +24,23 @@ import { ExpireQuotationsUseCase } from '../application/quotations/expire-quotat
 import { GetQuotationUseCase } from '../application/quotations/get-quotation.use-case';
 import { ListQuotationsUseCase } from '../application/quotations/list-quotations.use-case';
 import { UpdateQuotationUseCase } from '../application/quotations/update-quotation.use-case';
+import { CancelInvoiceUseCase } from '../application/invoices/cancel-invoice.use-case';
+import { CreateCreditNoteUseCase } from '../application/invoices/create-credit-note.use-case';
+import { CreateInvoiceUseCase } from '../application/invoices/create-invoice.use-case';
+import {
+  GetInvoiceBySaleUseCase,
+  GetInvoiceUseCase,
+} from '../application/invoices/get-invoice.use-case';
+import {
+  IssueCreditNoteUseCase,
+  RejectCreditNoteUseCase,
+} from '../application/invoices/issue-credit-note.use-case';
+import { IssueInvoiceUseCase } from '../application/invoices/issue-invoice.use-case';
+import { ListInvoicesUseCase } from '../application/invoices/list-invoices.use-case';
+import {
+  RejectInvoiceUseCase,
+  RetryInvoiceUseCase,
+} from '../application/invoices/reject-invoice.use-case';
 import { CancelReservationUseCase } from '../application/reservations/cancel-reservation.use-case';
 import { CreateReservationUseCase } from '../application/reservations/create-reservation.use-case';
 import { ExpireReservationsUseCase } from '../application/reservations/expire-reservations.use-case';
@@ -92,6 +109,7 @@ import { KyselyUnitOfWork } from '../infrastructure/database/kysely-unit-of-work
 import { logger } from '../infrastructure/logging/logger';
 import { KyselyCatalogRepository } from '../infrastructure/repositories/kysely-catalog.repository';
 import { KyselyClientRepository } from '../infrastructure/repositories/kysely-client.repository';
+import { KyselyInvoiceRepository } from '../infrastructure/repositories/kysely-invoice.repository';
 import { KyselyExpenseRepository } from '../infrastructure/repositories/kysely-expense.repository';
 import { KyselyPurchaseRepository } from '../infrastructure/repositories/kysely-purchase.repository';
 import { KyselyQuotationRepository } from '../infrastructure/repositories/kysely-quotation.repository';
@@ -107,6 +125,7 @@ import { SystemClock } from '../infrastructure/system-clock';
 import { ImageKitSigner } from '../infrastructure/uploads/imagekit-signer';
 import { CatalogsController } from '../presentation/http/catalogs/catalogs.controller';
 import { ClientsController } from '../presentation/http/clients/clients.controller';
+import { InvoicesController } from '../presentation/http/invoices/invoices.controller';
 import { ExpensesController } from '../presentation/http/expenses/expenses.controller';
 import { PurchasesController } from '../presentation/http/purchases/purchases.controller';
 import { QuotationsController } from '../presentation/http/quotations/quotations.controller';
@@ -142,6 +161,7 @@ export interface Container {
     readonly sales: SalesController;
     readonly catalogs: CatalogsController;
     readonly uploads: UploadsController;
+    readonly invoices: InvoicesController;
   };
   shutdown(): Promise<void>;
 }
@@ -187,6 +207,7 @@ export function buildContainer(): Container {
   const quotations = new KyselyQuotationRepository(db);
   const reservations = new KyselyReservationRepository(db);
   const sales = new KyselySaleRepository(db);
+  const invoices = new KyselyInvoiceRepository(db);
 
   // --- Sesiones -------------------------------------------------------------
   const sessionIssuer = new SessionIssuer(
@@ -465,7 +486,7 @@ export function buildContainer(): Container {
       audit,
     ),
     cancelSale: withAudit(
-      new CancelSaleUseCase(unitOfWork, sales),
+      new CancelSaleUseCase(unitOfWork, sales, invoices),
       { table: 'sales', action: 'update', recordIdFromInput: (input) => input.saleId },
       audit,
     ),
@@ -480,6 +501,60 @@ export function buildContainer(): Container {
         table: 'sale_payments',
         action: 'insert',
         recordIdFromOutput: (output) => output.payment.id,
+      },
+      audit,
+    ),
+  });
+
+  const invoicesController = new InvoicesController({
+    getInvoice: new GetInvoiceUseCase(invoices),
+    getInvoiceBySale: new GetInvoiceBySaleUseCase(invoices),
+    listInvoices: new ListInvoicesUseCase(invoices),
+    createInvoice: withAudit(
+      new CreateInvoiceUseCase(invoices, sales),
+      { table: 'invoices', action: 'insert', recordIdFromOutput: (invoice) => invoice.id },
+      audit,
+    ),
+    issueInvoice: withAudit(
+      new IssueInvoiceUseCase(invoices, clock),
+      { table: 'invoices', action: 'update', recordIdFromInput: (input) => input.invoiceId },
+      audit,
+    ),
+    rejectInvoice: withAudit(
+      new RejectInvoiceUseCase(invoices),
+      { table: 'invoices', action: 'update', recordIdFromInput: (input) => input.invoiceId },
+      audit,
+    ),
+    retryInvoice: withAudit(
+      new RetryInvoiceUseCase(invoices),
+      { table: 'invoices', action: 'update', recordIdFromInput: (input) => input.invoiceId },
+      audit,
+    ),
+    cancelInvoice: withAudit(
+      new CancelInvoiceUseCase(invoices),
+      { table: 'invoices', action: 'update', recordIdFromInput: (input) => input.invoiceId },
+      audit,
+    ),
+    createCreditNote: withAudit(
+      new CreateCreditNoteUseCase(invoices),
+      { table: 'credit_notes', action: 'insert', recordIdFromOutput: (note) => note.id },
+      audit,
+    ),
+    issueCreditNote: withAudit(
+      new IssueCreditNoteUseCase(invoices, clock),
+      {
+        table: 'credit_notes',
+        action: 'update',
+        recordIdFromInput: (input) => input.creditNoteId,
+      },
+      audit,
+    ),
+    rejectCreditNote: withAudit(
+      new RejectCreditNoteUseCase(invoices),
+      {
+        table: 'credit_notes',
+        action: 'update',
+        recordIdFromInput: (input) => input.creditNoteId,
       },
       audit,
     ),
@@ -523,6 +598,7 @@ export function buildContainer(): Container {
       sales: salesController,
       catalogs: catalogsController,
       uploads: uploadsController,
+      invoices: invoicesController,
     },
     async shutdown() {
       await db.destroy();

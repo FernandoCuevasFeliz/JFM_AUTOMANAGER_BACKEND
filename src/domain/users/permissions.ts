@@ -56,6 +56,11 @@ export const PERMISSIONS = [
   'payments:read',
   'payments:write',
 
+  'invoices:read',
+  'invoices:write',
+  'invoices:issue',
+  'credit-notes:write',
+
   'audit:read',
   'reports:read',
 ] as const;
@@ -91,6 +96,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
     'sales:write',
     'payments:read',
     'payments:write',
+    'invoices:read',
     'reports:read',
   ],
 
@@ -126,6 +132,10 @@ export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
     'sales:read',
     'payments:read',
     'payments:write',
+    'invoices:read',
+    'invoices:write',
+    'invoices:issue',
+    'credit-notes:write',
     'reports:read',
   ],
 };

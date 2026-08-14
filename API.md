@@ -331,6 +331,10 @@ lógico). Las acciones propias del negocio llevan su verbo: `vehicles:change-sta
 | `sales:write` | ✅ | ✅ | — | — |
 | `sales:delete` | ✅ | — | — | — |
 | `payments:read` / `write` | ✅ | ✅ | — | ✅ |
+| `invoices:read` | ✅ | ✅ | — | ✅ |
+| `invoices:write` | ✅ | — | — | ✅ |
+| `invoices:issue` | ✅ | — | — | ✅ |
+| `credit-notes:write` | ✅ | — | — | ✅ |
 | `audit:read` | ✅ | — | — | — |
 | `reports:read` | ✅ | ✅ | ✅ | ✅ |
 
@@ -869,6 +873,83 @@ Si el servidor no tiene `IMAGEKIT_PRIVATE_KEY` en su entorno, la ruta responde `
 con un mensaje explícito: es un fallo de despliegue, no del cliente. El frontend detecta esa
 situación por configuración propia y cae a su modo "pegar URL".
 
+### 5.12 Facturación electrónica (e-CF)
+
+| Método | Ruta | Permiso |
+|---|---|---|
+| `GET` | `/invoices` | `invoices:read` |
+| `GET` | `/invoices/:id` | `invoices:read` |
+| `GET` | `/invoices/by-sale/:saleId` | `invoices:read` |
+| `POST` | `/invoices` | `invoices:write` |
+| `POST` | `/invoices/:id/issue` | `invoices:issue` |
+| `POST` | `/invoices/:id/reject` | `invoices:issue` |
+| `POST` | `/invoices/:id/retry` | `invoices:write` |
+| `POST` | `/invoices/:id/cancel` | `invoices:write` |
+| `POST` | `/invoices/:id/credit-notes` | `credit-notes:write` |
+| `POST` | `/invoices/:id/credit-notes/:creditNoteId/issue` | `invoices:issue` |
+| `POST` | `/invoices/:id/credit-notes/:creditNoteId/reject` | `invoices:issue` |
+
+**No hay `DELETE` en todo el módulo**: un comprobante fiscal no se borra. Su ciclo de vida se
+gobierna con `status`.
+
+El backend **no habla con la DGII**. La firma digital y el envío los resuelve un PSFE homologado;
+estos endpoints registran el *resultado* de ese proceso. `POST /:id/issue` significa «la DGII aceptó
+este comprobante y devolvió este NCF».
+
+Filtros del listado: `search` (NCF, número de venta, cliente, documento), `status`, `ncfType`,
+`clientId`, `saleId`, `dateFrom`, `dateTo` (sobre `issuedAt`).
+
+```jsonc
+// POST /invoices — nace pendiente y SIN NCF
+{ "saleId": "…", "ncfType": "E31" }   // E31 | E32 | E44 | E45 (E34 es solo para notas)
+```
+
+```jsonc
+// POST /invoices/:id/issue — registra la aceptación de la DGII
+{ "ncfNumber": "E310000000001", "dgiiTrackId": "TRK-001", "xmlUrl": "https://…/cf.xml" }
+
+// POST /invoices/:id/reject
+{ "reason": "Falta el RNC del receptor" }
+```
+
+```jsonc
+// GET /invoices/:id
+{ "data": {
+  "id": "…", "saleId": "…", "ncfType": "E31", "ncfNumber": "E310000000001",
+  "status": "issued", "issuedAt": "2026-03-05T14:00:00.000Z",
+  "dgiiTrackId": "TRK-001", "xmlUrl": null, "rejectionReason": null,
+  "saleNumber": "VEN-2026-000001", "salePrice": 1800000, "currencyCode": "DOP",
+  "saleDate": "2026-03-05", "saleStatus": "completed",
+  "clientName": "Hidekel Reyes", "clientDocumentNumber": "402-1234567-8",
+  "vehicleChassisNumber": "JT2CC24A1R0100001", "createdByName": "Administrador General",
+  "creditNotes": [ … ],
+  "creditedAmount": 300000,
+  "netAmount": 1500000
+} }
+```
+
+`creditedAmount` suma **solo las notas emitidas**; `netAmount` es lo que sigue vigente de la venta.
+
+```jsonc
+// POST /invoices/:id/credit-notes
+{ "reason": "Devolucion parcial del vehiculo", "amount": 300000 }
+
+// POST /invoices/:id/credit-notes/:creditNoteId/issue
+{ "ncfNumber": "E340000000001", "dgiiTrackId": null, "xmlUrl": null }
+```
+
+Ambos endpoints de notas devuelven **la factura completa actualizada**, no la nota: es lo que la
+pantalla necesita repintar.
+
+#### Formato del NCF
+
+`E` + tipo (2 dígitos) + secuencia (10 dígitos) → `E310000000001`. El backend lo normaliza a
+mayúsculas y valida tres cosas: el formato, que el tipo coincida con el declarado en la factura
+(una nota de crédito siempre es `E34`), y que no esté repetido **ni en facturas ni en notas** — la
+DGII usa un solo espacio de numeración.
+
+---
+
 ---
 
 ## 6. Estados y transiciones
@@ -943,6 +1024,25 @@ active ──► converted  (final, al concretarse la venta)
    └─────► expired    (final, venció el plazo)
 ```
 
+### Documento fiscal (`status` de `invoices` y `credit_notes`)
+
+```
+   pending ──► issued ──► cancelled   (anulado por nota de crédito total)
+      │  ▲        │
+      ▼  │        ▼
+   rejected ──► cancelled
+```
+
+- `pending` — creado en el sistema, aún no aceptado por la DGII. Sin NCF.
+- `issued` — la DGII lo aceptó. **Inmutable**: ya tiene NCF y fecha de emisión.
+- `rejected` — la DGII lo rechazó; `rejectionReason` dice por qué. Se corrige y se reintenta
+  (`/retry`, que lo devuelve a `pending`).
+- `cancelled` — anulado. Terminal.
+
+`/cancel` solo sirve para descartar un comprobante que **aún no** fue aceptado. Una factura `issued`
+únicamente llega a `cancelled` cuando las notas de crédito cubren su importe completo, y eso lo hace
+el sistema solo al emitir la última nota.
+
 ### Venta (`status`)
 
 ```
@@ -1007,6 +1107,18 @@ Un vehículo no puede tener dos ventas vigentes a la vez (`409 CONFLICT`). Si la
 ambas ventas conviven en el historial.
 
 Lo mismo con las compras: un vehículo pertenece a una sola compra (`409 CONFLICT`).
+
+### Facturación: qué bloquea qué
+
+- Una venta **cancelada** no se factura.
+- Una venta tiene **un solo comprobante** (409 si se intenta un segundo).
+- Una factura solo admite notas de crédito si está `issued`: una pendiente todavía no existe para la
+  DGII, y una anulada ya no tiene importe que corregir.
+- La suma de las notas **no puede superar** el importe de la venta. Las notas *pendientes* también
+  consumen disponible, para que no se preparen dos que juntas se pasen.
+- **Una venta facturada no se puede cancelar.** Primero hay que anular el comprobante emitiendo
+  notas de crédito que cubran su importe; entonces la factura pasa a `cancelled` y la venta ya se
+  puede cancelar. En la interfaz conviene guiar ese orden: el error explica el paso que falta.
 
 ### Cobros y cierre
 

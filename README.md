@@ -95,6 +95,8 @@ Aplica cinco migraciones:
    índice único parcial que ignora las ventas canceladas.
 4. **`004_refresh_tokens`** — tabla `refresh_tokens` para sesiones persistentes.
 5. **`005_expenses_exchange_rate`** — añade `exchange_rate` a `expenses`.
+6. **`006_invoices`** — facturación electrónica: los ENUM `ncf_type_enum` y
+   `fiscal_doc_status_enum`, y las tablas `invoices` y `credit_notes`.
 
 Las tres últimas modifican el esquema entregado; el porqué de cada una está en
 [Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado).
@@ -366,7 +368,7 @@ src/
 ```
 
 Módulos: `users`, `vehicles`, `clients`, `suppliers`, `purchases`, `expenses`, `quotations`,
-`reservations`, `sales`, `catalogs`. Todos siguen la misma estructura.
+`reservations`, `sales`, `invoices`, `catalogs`. Todos siguen la misma estructura.
 
 ### Manejo de errores: `Result` en lugar de excepciones
 
@@ -451,6 +453,7 @@ se propaga **como valor**, no como excepción.
 | Caso de uso | Qué ocurre en la transacción |
 |---|---|
 | `create-sale` | valida disponibilidad → crea la venta → vehículo a `sold` → reserva y cotización a `converted` → registra el pago inicial |
+| `issue-credit-note` | registra la nota emitida y, si cubre el importe, anula la factura |
 | `create-reservation` | valida → crea la reserva → vehículo a `reserved` → cotización a `converted` |
 | `cancel-reservation` | reserva a `cancelled` → vehículo vuelve a `in_inventory` |
 | `cancel-sale` | venta a `cancelled` → vehículo vuelve a `in_inventory` |
@@ -469,6 +472,35 @@ vigentes a la vez (índice parcial `uq_sales_vehicle_active`). El dominio compru
 mismos predicados que la base** antes de insertar, y devuelve **409 con un mensaje que explica la
 regla** (`VehicleAlreadyPurchasedError`, `VehicleAlreadySoldError`) en lugar de dejar escapar el
 error de constraint de Postgres como un 500.
+
+### Facturación electrónica (e-CF, DGII Ley 32-23)
+
+El backend **no habla con la DGII**: la firma digital y el envío los resuelve un PSFE homologado.
+Estas tablas persisten el *resultado* del proceso fiscal (NCF asignado, acuse, XML, motivo de
+rechazo).
+
+Máquina de estados de `invoices` y `credit_notes`:
+
+```
+   pending ──► issued ──► cancelled     (anulado por nota de crédito total)
+      │  ▲        │
+      ▼  │        ▼
+   rejected ──► cancelled
+```
+
+Reglas modeladas:
+
+- **Ninguna de las dos tablas tiene `deleted_at`.** Por ley un comprobante fiscal no se borra: su
+  ciclo de vida se gobierna por completo con `status`.
+- Un comprobante `issued` es **inmutable**. Corregirlo o anularlo exige emitir notas de crédito
+  (e-CF E34); cuando estas cubren el importe completo, el sistema anula la factura solo.
+- El NCF se valida en formato (`E` + tipo + secuencia), en coherencia con el tipo declarado, y en
+  unicidad **cruzando ambas tablas**: la DGII usa un único espacio de numeración.
+- **Una venta facturada no se puede cancelar** mientras su comprobante siga vivo. Un e-CF emitido no
+  desaparece porque el sistema marque la venta como anulada. Primero la nota de crédito, después la
+  cancelación.
+- `invoices:issue` es un permiso propio, separado de `invoices:write`: preparar un borrador y
+  declarar que la DGII lo aceptó son actos de peso distinto, y el segundo fija un NCF irreversible.
 
 ### Otras reglas
 
