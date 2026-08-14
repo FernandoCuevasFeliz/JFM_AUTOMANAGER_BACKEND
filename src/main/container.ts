@@ -41,6 +41,15 @@ import {
   RejectInvoiceUseCase,
   RetryInvoiceUseCase,
 } from '../application/invoices/reject-invoice.use-case';
+import { GetAccountsReceivableUseCase } from '../application/reports/get-accounts-receivable.use-case';
+import { GetFiscalDocumentsReportUseCase } from '../application/reports/get-fiscal-documents-report.use-case';
+import { GetInventoryStatusReportUseCase } from '../application/reports/get-inventory-status-report.use-case';
+import { GetMonthlyExpensesReportUseCase } from '../application/reports/get-monthly-expenses-report.use-case';
+import {
+  GetMonthlySalesReportUseCase,
+  GetSalesBySalespersonReportUseCase,
+} from '../application/reports/get-sales-reports.use-case';
+import { GetVehicleProfitabilityUseCase } from '../application/reports/get-vehicle-profitability.use-case';
 import { CancelReservationUseCase } from '../application/reservations/cancel-reservation.use-case';
 import { CreateReservationUseCase } from '../application/reservations/create-reservation.use-case';
 import { ExpireReservationsUseCase } from '../application/reservations/expire-reservations.use-case';
@@ -112,6 +121,7 @@ import { KyselyClientRepository } from '../infrastructure/repositories/kysely-cl
 import { KyselyInvoiceRepository } from '../infrastructure/repositories/kysely-invoice.repository';
 import { KyselyExpenseRepository } from '../infrastructure/repositories/kysely-expense.repository';
 import { KyselyPurchaseRepository } from '../infrastructure/repositories/kysely-purchase.repository';
+import { KyselyReportRepository } from '../infrastructure/repositories/kysely-report.repository';
 import { KyselyQuotationRepository } from '../infrastructure/repositories/kysely-quotation.repository';
 import { KyselyRefreshTokenRepository } from '../infrastructure/repositories/kysely-refresh-token.repository';
 import { KyselyReservationRepository } from '../infrastructure/repositories/kysely-reservation.repository';
@@ -129,6 +139,7 @@ import { InvoicesController } from '../presentation/http/invoices/invoices.contr
 import { ExpensesController } from '../presentation/http/expenses/expenses.controller';
 import { PurchasesController } from '../presentation/http/purchases/purchases.controller';
 import { QuotationsController } from '../presentation/http/quotations/quotations.controller';
+import { ReportsController } from '../presentation/http/reports/reports.controller';
 import { ReservationsController } from '../presentation/http/reservations/reservations.controller';
 import { SalesController } from '../presentation/http/sales/sales.controller';
 import { SuppliersController } from '../presentation/http/suppliers/suppliers.controller';
@@ -162,6 +173,7 @@ export interface Container {
     readonly catalogs: CatalogsController;
     readonly uploads: UploadsController;
     readonly invoices: InvoicesController;
+    readonly reports: ReportsController;
   };
   shutdown(): Promise<void>;
 }
@@ -208,6 +220,7 @@ export function buildContainer(): Container {
   const reservations = new KyselyReservationRepository(db);
   const sales = new KyselySaleRepository(db);
   const invoices = new KyselyInvoiceRepository(db);
+  const reports = new KyselyReportRepository(db);
 
   // --- Sesiones -------------------------------------------------------------
   const sessionIssuer = new SessionIssuer(
@@ -560,6 +573,18 @@ export function buildContainer(): Container {
     ),
   });
 
+  // Ningun caso de uso de reportes pasa por `withAudit`: una consulta no
+  // modifica nada, y el registro de auditoria es de escrituras.
+  const reportsController = new ReportsController({
+    vehicleProfitability: new GetVehicleProfitabilityUseCase(reports),
+    accountsReceivable: new GetAccountsReceivableUseCase(reports),
+    monthlySales: new GetMonthlySalesReportUseCase(reports),
+    salesBySalesperson: new GetSalesBySalespersonReportUseCase(reports),
+    monthlyExpenses: new GetMonthlyExpensesReportUseCase(reports),
+    inventoryStatus: new GetInventoryStatusReportUseCase(reports),
+    fiscalDocuments: new GetFiscalDocumentsReportUseCase(reports),
+  });
+
   const catalogsController = new CatalogsController({
     listCatalogs: new ListCatalogsUseCase(catalog),
     createExpenseCategory: withAudit(
@@ -599,6 +624,7 @@ export function buildContainer(): Container {
       catalogs: catalogsController,
       uploads: uploadsController,
       invoices: invoicesController,
+      reports: reportsController,
     },
     async shutdown() {
       await db.destroy();

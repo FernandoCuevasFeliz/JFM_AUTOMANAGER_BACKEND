@@ -85,7 +85,7 @@ createdb ejgh_autoimport
 npm run db:migrate
 ```
 
-Aplica cinco migraciones:
+Aplica siete migraciones:
 
 1. **`001_initial_schema`** — transcripción literal de `schema_ejgh_autoimport.sql`: extensión
    `pgcrypto`, los 8 ENUM, las 20 tablas, índices y los triggers de `updated_at`.
@@ -97,9 +97,12 @@ Aplica cinco migraciones:
 5. **`005_expenses_exchange_rate`** — añade `exchange_rate` a `expenses`.
 6. **`006_invoices`** — facturación electrónica: los ENUM `ncf_type_enum` y
    `fiscal_doc_status_enum`, y las tablas `invoices` y `credit_notes`.
+7. **`007_report_views`** — las siete vistas de reporte (`vw_*`). No crea tablas ni columnas: son
+   consultas con nombre sobre lo que ya existe.
 
-Las tres últimas modifican el esquema entregado; el porqué de cada una está en
-[Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado).
+De la tercera a la sexta modifican el esquema entregado; el porqué de cada una está en
+[Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado). La séptima no lo
+modifica: una vista no altera el modelo de datos.
 
 Para revertir la última migración:
 
@@ -368,7 +371,8 @@ src/
 ```
 
 Módulos: `users`, `vehicles`, `clients`, `suppliers`, `purchases`, `expenses`, `quotations`,
-`reservations`, `sales`, `invoices`, `catalogs`. Todos siguen la misma estructura.
+`reservations`, `sales`, `invoices`, `catalogs`, `reports`. Todos siguen la misma estructura
+(`reports` no tiene `.errors.ts`: consultar un reporte no viola ninguna regla de negocio).
 
 ### Manejo de errores: `Result` en lugar de excepciones
 
@@ -759,6 +763,43 @@ Se cerró con una regla de negocio en vez de con otra columna: el abono debe reg
 de la venta (422 si no coincide). Si el cliente paga en otra divisa, la conversión la hace la caja
 al recibir, no el sistema al sumar.
 
+### Reportes: vistas SQL, no tablas nuevas (migración 007)
+
+El módulo de reportes no agrega ni una tabla ni una columna. Son siete `CREATE VIEW` sobre el
+esquema existente, así que **la 3FN queda intacta**: no hay ningún dato duplicado que pueda quedar
+desincronizado con su origen, y un reporte nunca puede contradecir a la operación porque lee de
+ella.
+
+| Vista | Qué responde |
+|---|---|
+| `vw_vehicle_profitability` | costo real (compra + gastos) vs. precio de venta y margen, por unidad |
+| `vw_accounts_receivable` | saldo pendiente por venta (`sale_price` − pagos), sin las canceladas |
+| `vw_sales_summary_monthly` | ventas completadas por mes y moneda |
+| `vw_sales_by_salesperson` | lo mismo, abierto por vendedor: ranking de desempeño |
+| `vw_expenses_summary_monthly` | gastos por mes, categoría, alcance y moneda |
+| `vw_inventory_status_summary` | conteo de vehículos activos por `status` |
+| `vw_fiscal_documents_summary` | comprobantes por mes, tipo y estado — control ante la DGII |
+
+Tres criterios comunes a todas: filtran el borrado lógico (un registro archivado no aparece en un
+reporte), exponen cada importe en la moneda del documento **y** convertido con la tasa de ese mismo
+documento (solo lo convertido es sumable entre monedas), y devuelven `currencies.code` ya sin el
+relleno del `CHAR(3)`.
+
+Dónde vive cada cosa: el cálculo está **en la vista**, y `KyselyReportRepository` solo filtra,
+ordena y traduce a `camelCase`. Si un margen cambia de definición, cambia la vista.
+
+**Acceso.** Los cinco agregados piden solo `reports:read`, que tienen los cuatro roles: una cifra
+consolidada no revela el detalle de nadie. Los dos reportes de detalle piden además el permiso del
+módulo que exponen —`expenses:read` para rentabilidad, `sales:read` para cuentas por cobrar— para
+que un reporte no sea una puerta lateral a datos que el rol no puede ver por su propio módulo. En
+la práctica: `ventas` no ve márgenes, `inventario` no ve saldos de clientes. Se cambia en una línea
+de `reports.routes.ts` si el negocio decide otra cosa.
+
+Si alguna se vuelve lenta con el volumen, se convierte puntualmente a `MATERIALIZED VIEW` con
+refresco programado, sin tocar el resto del esquema. La única que cambiaría de semántica al
+materializarse es `vw_accounts_receivable`: su `daysOutstanding` se calcula contra `CURRENT_DATE` y
+quedaría congelado en la fecha del último refresco.
+
 ### Categorías de gasto sembradas
 
 La migración `002` añade diez categorías de gasto que **no venían** en el script original
@@ -780,7 +821,7 @@ Ver `src/infrastructure/database/pg-types.ts`.
 
 Comprobado contra una base PostgreSQL real:
 
-- las **cinco** migraciones aplican en orden y el seed crea el administrador; el `UNIQUE` de
+- las **siete** migraciones aplican en orden y el seed crea el administrador; el `UNIQUE` de
   `sales.vehicle_id` queda sustituido por `uq_sales_vehicle_active` y el único `UNIQUE` que
   permanece en `sales` es el de `sale_number`;
 - el ciclo comercial completo funciona de punta a punta: marca → vehículo → proveedor → compra →
@@ -797,4 +838,10 @@ Comprobado contra una base PostgreSQL real:
   inválidas, saldos excedidos, `scope` incoherente y tasas incoherentes, 400 en errores de forma);
 - RBAC bloquea a `ventas` la creación de vehículos y la administración de usuarios;
 - `audit_logs` se llena solo, sin `password_hash`;
-- `npm run typecheck`, `npm run build` y `npm test` (60 pruebas) pasan en limpio.
+- **reportes**: las siete vistas se crean y se revierten (`007` baja y vuelve a subir sin residuos),
+  y los siete endpoints devuelven datos coherentes con el juego de demostración: el margen por
+  vehículo cuadra con la compra en USD más los gastos convertidos, la venta cancelada no aparece ni
+  en cuentas por cobrar ni consumiendo la unidad, el reporte mensual cuenta solo las ventas
+  completadas, `?dateFrom=2026-07-15` devuelve julio completo, y el inventario devuelve los seis
+  estados aunque alguno esté en cero;
+- `npm run typecheck`, `npm run build` y `npm test` (110 pruebas) pasan en limpio.

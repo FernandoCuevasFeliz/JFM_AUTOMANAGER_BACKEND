@@ -382,6 +382,113 @@ export interface CreditNotesTable {
   updated_at: GeneratedTimestamp;
 }
 
+// --- 9. Vistas de reporte (solo lectura) ------------------------------------
+
+/**
+ * Las vistas de la migracion 007 se declaran como cualquier otra "tabla" para
+ * poder consultarlas con el constructor de queries, pero sus columnas se tipan
+ * con tipos planos (`number`, `string`) en vez de `ColumnType`: son de solo
+ * lectura y nadie debe insertar ni actualizar sobre ellas.
+ *
+ * Las columnas `*_converted` vienen ya en la moneda de reporte (DOP); las demas
+ * conservan la moneda del documento, indicada en `currency_code`.
+ */
+export interface VwVehicleProfitabilityTable {
+  vehicle_id: string;
+  chassis_number: string;
+  brand_name: string;
+  model_name: string;
+  year: number;
+  status: VehicleStatusEnum;
+  is_active: boolean;
+  list_price: number | null;
+  purchase_currency_code: string | null;
+  purchase_exchange_rate: number | null;
+  import_subtotal: number;
+  import_subtotal_converted: number;
+  expenses_total_converted: number;
+  total_cost_converted: number;
+  /** NULL mientras el vehiculo no tenga una venta vigente. */
+  sale_id: string | null;
+  sale_number: string | null;
+  sale_status: SaleStatusEnum | null;
+  sale_date: string | null;
+  sale_currency_code: string | null;
+  sold_price: number | null;
+  sold_price_converted: number | null;
+  margin: number | null;
+  margin_percentage: number | null;
+}
+
+export interface VwAccountsReceivableTable {
+  sale_id: string;
+  sale_number: string;
+  sale_date: string;
+  sale_status: SaleStatusEnum;
+  client_id: string;
+  client_name: string;
+  client_phone: string;
+  vehicle_id: string;
+  chassis_number: string;
+  salesperson_id: string;
+  salesperson_name: string;
+  currency_code: string;
+  exchange_rate: number;
+  sale_price: number;
+  total_paid: number;
+  pending_balance: number;
+  pending_balance_converted: number;
+  days_outstanding: number;
+}
+
+export interface VwSalesSummaryMonthlyTable {
+  /** Primer dia del mes (`YYYY-MM-01`). */
+  month: string;
+  currency_code: string;
+  sales_count: number;
+  total_amount: number;
+  total_amount_converted: number;
+}
+
+export interface VwSalesBySalespersonTable {
+  month: string;
+  salesperson_id: string;
+  salesperson_name: string;
+  currency_code: string;
+  sales_count: number;
+  total_amount: number;
+  total_amount_converted: number;
+}
+
+export interface VwExpensesSummaryMonthlyTable {
+  month: string;
+  category_id: string;
+  category_name: string;
+  scope: ExpenseScopeEnum;
+  currency_code: string;
+  expense_count: number;
+  total_amount: number;
+  total_amount_converted: number;
+}
+
+export interface VwInventoryStatusSummaryTable {
+  status: VehicleStatusEnum;
+  vehicle_count: number;
+}
+
+export type FiscalDocumentKind = 'invoice' | 'credit_note';
+
+export interface VwFiscalDocumentsSummaryTable {
+  month: string;
+  document_kind: FiscalDocumentKind;
+  ncf_type: NcfTypeEnum;
+  status: FiscalDocStatusEnum;
+  currency_code: string;
+  document_count: number;
+  total_amount: number;
+  total_amount_converted: number;
+}
+
 // --- Mapa de la base de datos ----------------------------------------------
 
 export interface DB {
@@ -408,4 +515,13 @@ export interface DB {
   vehicle_images: VehicleImagesTable;
   vehicle_models: VehicleModelsTable;
   vehicles: VehiclesTable;
+
+  // Vistas de reporte (migracion 007). Solo lectura.
+  vw_accounts_receivable: VwAccountsReceivableTable;
+  vw_expenses_summary_monthly: VwExpensesSummaryMonthlyTable;
+  vw_fiscal_documents_summary: VwFiscalDocumentsSummaryTable;
+  vw_inventory_status_summary: VwInventoryStatusSummaryTable;
+  vw_sales_by_salesperson: VwSalesBySalespersonTable;
+  vw_sales_summary_monthly: VwSalesSummaryMonthlyTable;
+  vw_vehicle_profitability: VwVehicleProfitabilityTable;
 }

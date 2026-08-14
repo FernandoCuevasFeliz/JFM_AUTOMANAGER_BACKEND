@@ -345,6 +345,10 @@ tiene ningún permiso** (fail-closed).
 > consulta de `audit_logs`; la tabla se escribe pero no se lee) y `reservations:delete` (las reservas
 > se cancelan, no se borran). No construyas pantallas para ellos todavía.
 
+`reports:read` cubre `GET /sales/summary` y todo `/reports` ([§5.13](#513-reportes)). Lo tienen los
+cuatro roles, pero los dos reportes de detalle exigen **además** el permiso del módulo que exponen
+(`expenses:read` para rentabilidad, `sales:read` para cuentas por cobrar).
+
 ---
 
 ## 4. Arranque de la aplicación
@@ -950,6 +954,178 @@ DGII usa un solo espacio de numeración.
 
 ---
 
+### 5.13 Reportes
+
+**Todos son `GET`**: por debajo son vistas SQL de solo lectura, no hay nada que escribir.
+
+| Método | Ruta | Permiso | Devuelve |
+|---|---|---|---|
+| `GET` | `/reports/vehicle-profitability` | `reports:read` + `expenses:read` | paginado |
+| `GET` | `/reports/accounts-receivable` | `reports:read` + `sales:read` | paginado |
+| `GET` | `/reports/sales-monthly` | `reports:read` | arreglo |
+| `GET` | `/reports/sales-by-salesperson` | `reports:read` | arreglo |
+| `GET` | `/reports/expenses-monthly` | `reports:read` | arreglo |
+| `GET` | `/reports/inventory-status` | `reports:read` | arreglo |
+| `GET` | `/reports/fiscal-documents` | `reports:read` | arreglo |
+
+Los agregados piden solo `reports:read`, que tienen los cuatro roles. Los **dos de detalle** exigen
+además el permiso de lectura del módulo del que sacan la información, para que un reporte no sea una
+puerta lateral a datos que el rol no ve por su propio módulo: en la práctica, `ventas` **no** puede
+abrir rentabilidad (expone el costo y el margen unidad por unidad) e `inventario` **no** puede abrir
+cuentas por cobrar (expone cliente, teléfono y saldo). Ambos devuelven **403** con el detalle de qué
+permiso falta, así que el menú debe ocultar la opción según el rol.
+
+Los dos primeros crecen con la operación (una fila por vehículo / por venta), así que se paginan
+igual que cualquier listado y traen `meta`. Los agregados devuelven el arreglo completo: su tamaño
+lo acota el rango de fechas, no el volumen de datos.
+
+#### Monedas
+
+Cada importe viaja **dos veces**: en la moneda del documento (`currencyCode`) y convertido a pesos
+con la tasa registrada en ese documento, con el sufijo `Converted`. **Solo se pueden sumar entre sí
+los `Converted`**; sumar `totalAmount` de una fila en USD con otra en DOP no significa nada. Es el
+mismo criterio de costo histórico que usa el resto del sistema (ver §7).
+
+#### Rangos de fecha
+
+`dateFrom` / `dateTo` son `YYYY-MM-DD` inclusivos. En los reportes **mensuales** el backend lleva
+cada extremo al mes al que pertenece: `dateFrom=2026-03-15` incluye marzo completo. Un mes parcial
+no existe en estos reportes, así que la UI puede mandar la fecha que tenga a mano sin normalizarla.
+
+#### `GET /reports/vehicle-profitability`
+
+Costo real contra precio de venta, unidad por unidad. Filtros: `search` (chasis, marca o modelo),
+`status`, `vehicleId`, `sold` (`true` solo vendidos, `false` solo en stock), `dateFrom`, `dateTo`
+(sobre la fecha de venta), más `page` / `pageSize`.
+
+```jsonc
+{ "data": [{
+  "vehicleId": "…", "chassisNumber": "JT2CC24A1R0100001",
+  "brandName": "Toyota", "modelName": "Corolla Cross", "year": 2023,
+  "status": "sold", "isActive": true,
+  "listPrice": 1800000,
+  "purchaseCurrencyCode": "USD", "purchaseExchangeRate": 61.5,
+  "importSubtotal": 12247,             // compra + flete + seguro + otros, en USD
+  "importSubtotalConverted": 753225,   // …lo mismo en DOP
+  "expensesTotalConverted": 185500,    // gastos imputados a la unidad
+  "totalCostConverted": 938725,        // costo real
+  "saleId": "…", "saleNumber": "VEN-2026-000001", "saleStatus": "completed",
+  "saleDate": "2026-07-10", "saleCurrencyCode": "DOP",
+  "soldPrice": 1800000, "soldPriceConverted": 1800000,
+  "margin": 861275, "marginPercentage": 91.75
+}], "meta": { … } }
+```
+
+Un vehículo sin vender aparece igual, con todo lo de la venta en `null` (incluidos `margin` y
+`marginPercentage`). `marginPercentage` también es `null` cuando el costo es cero: no está definido.
+Una venta **cancelada** no cuenta: la unidad vuelve a figurar como no vendida.
+
+#### `GET /reports/accounts-receivable`
+
+Saldo pendiente por venta. Filtros: `search` (número de venta, cliente o chasis), `clientId`,
+`salespersonId`, `onlyPending`, `minDaysOutstanding`, `dateFrom`, `dateTo`, `page`, `pageSize`.
+
+**Por defecto solo devuelve ventas con saldo.** Para ver también las saldadas hay que pedir
+`?onlyPending=false`. Las canceladas nunca aparecen: no generan derecho de cobro.
+
+```jsonc
+{ "data": [{
+  "saleId": "…", "saleNumber": "VEN-2026-000002", "saleDate": "2026-08-06",
+  "saleStatus": "in_process",
+  "clientId": "…", "clientName": "Transporte del Cibao SRL", "clientPhone": "809-555-1004",
+  "vehicleId": "…", "chassisNumber": "JT2RV23B2S0100002",
+  "salespersonId": "…", "salespersonName": "Administrador General",
+  "currencyCode": "DOP", "exchangeRate": 1,
+  "salePrice": 2100000, "totalPaid": 700000,
+  "pendingBalance": 1400000, "pendingBalanceConverted": 1400000,
+  "daysOutstanding": 8
+}], "meta": { … } }
+```
+
+`daysOutstanding` son los días transcurridos desde la fecha de la venta — útil para pintar la
+antigüedad de la deuda.
+
+#### `GET /reports/sales-monthly` y `GET /reports/sales-by-salesperson`
+
+Ventas **completadas** por mes y moneda; el segundo abre además por vendedor y sirve de ranking
+(dentro de cada mes viene ordenado de mayor a menor). Una venta en proceso todavía puede caerse, así
+que no cuenta como ingreso del período. Filtros: `dateFrom`, `dateTo`, `currency` (código ISO), y
+`salespersonId` en el segundo.
+
+```jsonc
+// GET /reports/sales-monthly
+{ "data": [
+  { "month": "2026-07-01", "currencyCode": "DOP", "salesCount": 2,
+    "totalAmount": 3900000, "totalAmountConverted": 3900000 }
+] }
+
+// GET /reports/sales-by-salesperson — mismas columnas + vendedor
+{ "data": [
+  { "month": "2026-07-01", "salespersonId": "…", "salespersonName": "Administrador General",
+    "currencyCode": "DOP", "salesCount": 1, "totalAmount": 1800000, "totalAmountConverted": 1800000 }
+] }
+```
+
+`month` es siempre el **día 1 del mes** (`YYYY-MM-01`), no un rango: es una fecha para que ordene y
+se compare como tal.
+
+#### `GET /reports/expenses-monthly`
+
+Gastos por mes, categoría, alcance y moneda. Filtros: `dateFrom`, `dateTo`, `currency`,
+`categoryId`, `scope` (`general` | `vehicle`).
+
+```jsonc
+{ "data": [
+  { "month": "2026-06-01", "categoryId": "…", "categoryName": "Transporte interno",
+    "scope": "vehicle", "currencyCode": "USD", "expenseCount": 1,
+    "totalAmount": 300, "totalAmountConverted": 18300 }
+] }
+```
+
+`scope` es el del **gasto**, no el de su categoría: `vehicle` si quedó imputado a una unidad
+concreta, `general` si fue de la operación.
+
+#### `GET /reports/inventory-status`
+
+Conteo de vehículos activos por estado. Sin filtros y sin paginación.
+
+```jsonc
+{ "data": [
+  { "status": "in_transit", "vehicleCount": 2 },
+  { "status": "in_inventory", "vehicleCount": 3 },
+  { "status": "reserved", "vehicleCount": 1 },
+  { "status": "sold", "vehicleCount": 4 },
+  { "status": "in_repair", "vehicleCount": 1 },
+  { "status": "unavailable", "vehicleCount": 1 }
+] }
+```
+
+Devuelve **siempre los seis estados**, incluidos los que están en cero: el tablero no cambia de
+forma según el día.
+
+#### `GET /reports/fiscal-documents`
+
+Comprobantes fiscales por mes, tipo y estado — el control de qué se emitió y qué quedó pendiente o
+rechazado ante la DGII. Filtros: `dateFrom`, `dateTo`, `currency`, `documentKind`
+(`invoice` | `credit_note`), `ncfType`, `status`.
+
+```jsonc
+{ "data": [
+  { "month": "2026-08-01", "documentKind": "invoice", "ncfType": "E31", "status": "issued",
+    "currencyCode": "DOP", "documentCount": 2,
+    "totalAmount": 3900000, "totalAmountConverted": 3900000 },
+  { "month": "2026-08-01", "documentKind": "credit_note", "ncfType": "E34", "status": "issued",
+    "currencyCode": "DOP", "documentCount": 1,
+    "totalAmount": 100000, "totalAmountConverted": 100000 }
+] }
+```
+
+Facturas y notas de crédito conviven en el mismo reporte porque ante la DGII las dos son e-CF; se
+distinguen por `documentKind`. La nota de crédito siempre es `E34`. El mes es el de **emisión**, y
+mientras el comprobante siga sin emitirse (pendiente o rechazado) se usa el de registro, que es
+cuando interesa saber qué quedó sin resolver en el período. El importe de una factura es el de su
+venta; el de una nota de crédito, el suyo propio.
+
 ---
 
 ## 6. Estados y transiciones
@@ -1186,6 +1362,7 @@ Dónde mirar según la duda:
 | Transiciones de estado válidas | `src/domain/<módulo>/<entidad>.entity.ts` (constantes `…_TRANSITIONS`) |
 | El mapa completo de permisos | `src/domain/users/permissions.ts` |
 | Reglas de conversión de moneda | `src/domain/shared/money.ts` |
+| Cómo se calcula un reporte | `src/infrastructure/database/migrations/007_report_views.ts` (son vistas SQL) |
 
 Los esquemas Zod son la **fuente de verdad** de lo que acepta cada endpoint: si este documento y un
 schema discrepan, gana el schema.

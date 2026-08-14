@@ -76,7 +76,9 @@ Leyenda: ✅ puede · ❌ recibe `403 FORBIDDEN`
 | Registrar emisión/rechazo de la DGII | ✅ | ❌ | ❌ | ✅ |
 | Emitir notas de crédito | ✅ | ❌ | ❌ | ✅ |
 | **Reportes** |
-| Costo real y margen por vehículo, resumen de ventas | ✅ | ✅ | ✅ | ✅ |
+| Resúmenes mensuales (ventas, vendedores, gastos, inventario, comprobantes) | ✅ | ✅ | ✅ | ✅ |
+| Rentabilidad por vehículo (costo real y margen) | ✅ | ❌ | ✅ | ✅ |
+| Cuentas por cobrar (saldo por venta) | ✅ | ✅ | ❌ | ✅ |
 
 La fuente de verdad es `src/domain/users/permissions.ts`. Un rol que no aparezca ahí **no tiene
 ningún permiso**: crear un rol nuevo en la tabla no otorga acceso hasta declararlo en el código.
@@ -114,6 +116,15 @@ curl -s -o /dev/null -w '%{http_code}\n' $API/users -H "authorization: Bearer $I
 # contabilidad registra gastos; ventas no
 curl -s -o /dev/null -w '%{http_code}\n' $API/expenses -H "authorization: Bearer $CONTA"     # 200
 curl -s -o /dev/null -w '%{http_code}\n' $API/expenses -H "authorization: Bearer $VENTAS"    # 403
+```
+
+```bash
+# los resúmenes son para todos, el detalle sensible no:
+# ventas no ve márgenes, inventario no ve saldos de clientes
+curl -s -o /dev/null -w '%{http_code}\n' $API/reports/sales-monthly -H "authorization: Bearer $INVENTARIO"          # 200
+curl -s -o /dev/null -w '%{http_code}\n' $API/reports/vehicle-profitability -H "authorization: Bearer $VENTAS"      # 403
+curl -s -o /dev/null -w '%{http_code}\n' $API/reports/accounts-receivable -H "authorization: Bearer $INVENTARIO"    # 403
+curl -s -o /dev/null -w '%{http_code}\n' $API/reports/accounts-receivable -H "authorization: Bearer $CONTA"         # 200
 ```
 
 ---
