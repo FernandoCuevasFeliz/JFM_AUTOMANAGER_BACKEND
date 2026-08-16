@@ -68,11 +68,20 @@ export class SaleNotEditableError extends BusinessRuleError {
   }
 }
 
+/**
+ * El precio pactado no cubre el deposito que el cliente ya entrego.
+ *
+ * Los dos importes llegan **en la moneda de reporte**: el deposito se guarda
+ * asi (`reservations.deposit_amount` no tiene columna de moneda) y el precio se
+ * convierte con la tasa de la venta antes de compararlos. Sin esa conversion,
+ * una venta de 30.000 dolares contra un deposito de 150.000 pesos se rechazaba
+ * estando perfectamente bien.
+ */
 export class SalePriceBelowDepositError extends BusinessRuleError {
-  constructor(salePrice: number, depositAmount: number) {
+  constructor(salePriceConverted: number, depositAmount: number) {
     super(
-      `El precio de venta (${salePrice.toFixed(2)}) no puede ser menor que el deposito ya recibido en la reserva (${depositAmount.toFixed(2)})`,
-      { salePrice, depositAmount },
+      `El precio de venta (${salePriceConverted.toFixed(2)} en moneda de reporte) no puede ser menor que el deposito ya recibido en la reserva (${depositAmount.toFixed(2)})`,
+      { salePriceConverted, depositAmount },
     );
   }
 }

@@ -240,9 +240,26 @@ export class KyselySaleRepository implements SaleRepository {
   }
 
   async summary(filters: SaleFilters): Promise<SalesSummary> {
-    const base = this.applyFilters(this.baseJoin(), filters);
+    /*
+     * Una venta anulada no es facturacion, ni cobro, ni cartera.
+     *
+     * El resumen alimenta las tarjetas del tablero, que se piden sin filtro de
+     * estado. Contando las canceladas, una venta caida seguia sumando su
+     * importe a «Ventas registradas» y su saldo a «Saldo por cobrar», y el
+     * tablero contradecia al reporte de cuentas por cobrar, cuya vista
+     * (`vw_accounts_receivable`) si las excluye: dos pantallas dando cifras
+     * distintas del mismo dinero.
+     *
+     * El filtro explicito manda: quien pide `status=cancelled` quiere verlas.
+     */
+    const conFiltros = () => {
+      const query = this.applyFilters(this.baseJoin(), filters);
+      return filters.status === undefined
+        ? query.where('sales.status', '<>', 'cancelled')
+        : query;
+    };
 
-    const totals = await base
+    const totals = await conFiltros()
       .select((eb) => [
         eb.fn.countAll<number>().as('total_sales'),
         eb.fn.sum<number>(sql`sales.sale_price * sales.exchange_rate`).as('total_amount'),
@@ -251,7 +268,7 @@ export class KyselySaleRepository implements SaleRepository {
 
     // El abono se registra siempre en la moneda de la venta (lo garantiza
     // `register-sale-payment`), asi que se convierte con la tasa de la venta.
-    const collected = await this.applyFilters(this.baseJoin(), filters)
+    const collected = await conFiltros()
       .innerJoin('sale_payments', 'sale_payments.sale_id', 'sales.id')
       .select((eb) =>
         eb.fn

@@ -27,7 +27,7 @@ import {
 import type { SaleRepository } from '../../domain/sales/sale.repository';
 import type { Clock } from '../../domain/shared/clock';
 import type { DomainError } from '../../domain/shared/domain-error';
-import { isExchangeRateConsistent } from '../../domain/shared/money';
+import { isExchangeRateConsistent, toReportingCurrency } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import type { UnitOfWork } from '../../domain/shared/unit-of-work';
 import { isSellable } from '../../domain/vehicles/vehicle.entity';
@@ -148,8 +148,20 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
         if (!isReservationConvertible(reservation, today)) {
           return err(new ReservationNotConvertibleError(input.reservationId, reservation.status));
         }
-        if (input.salePrice < reservation.depositAmount) {
-          return err(new SalePriceBelowDepositError(input.salePrice, reservation.depositAmount));
+        /*
+         * Los dos importes, en la misma moneda antes de compararlos.
+         *
+         * `deposit_amount` se guarda sin moneda —esta en la de reporte por
+         * convencion— mientras que `salePrice` viene en la divisa de la venta.
+         * Comparandolos en crudo, una venta de 30.000 dolares contra un
+         * deposito de 150.000 pesos se rechazaba estando bien; y al reves, una
+         * venta en una divisa debil pasaba un control que deberia frenarla.
+         */
+        const salePriceConverted = toReportingCurrency(input.salePrice, input.exchangeRate);
+        if (salePriceConverted < reservation.depositAmount) {
+          return err(
+            new SalePriceBelowDepositError(salePriceConverted, reservation.depositAmount),
+          );
         }
       }
 

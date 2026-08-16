@@ -1,5 +1,8 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
-import { CurrencyNotFoundError } from '../../domain/catalogs/catalog.errors';
+import {
+  CurrencyNotFoundError,
+  InconsistentExchangeRateError,
+} from '../../domain/catalogs/catalog.errors';
 import { isPurchaseEditable, type PurchaseWithDetails } from '../../domain/purchases/purchase.entity';
 import {
   PurchaseNotEditableError,
@@ -7,6 +10,7 @@ import {
 } from '../../domain/purchases/purchase.errors';
 import type { PurchaseRepository } from '../../domain/purchases/purchase.repository';
 import type { DomainError } from '../../domain/shared/domain-error';
+import { isExchangeRateConsistent } from '../../domain/shared/money';
 import { err, ok, type Result } from '../../domain/shared/result';
 import { SupplierNotFoundError } from '../../domain/suppliers/supplier.errors';
 import type { SupplierRepository } from '../../domain/suppliers/supplier.repository';
@@ -51,11 +55,25 @@ export class UpdatePurchaseUseCase implements UseCase<UpdatePurchaseInput, Purch
       return err(new SupplierNotFoundError(input.supplierId));
     }
 
-    if (
-      input.currencyId !== undefined &&
-      (await this.catalog.findCurrencyById(input.currencyId)) === null
-    ) {
-      return err(new CurrencyNotFoundError(input.currencyId));
+    /*
+     * La moneda y la tasa se juzgan juntas, y sobre el estado RESULTANTE.
+     *
+     * Antes solo se comprobaba que la moneda existiera, asi que por PATCH se
+     * podia dejar una compra en pesos con tasa 45,5 —lo que el alta rechaza con
+     * `InconsistentExchangeRateError`— y bastaba enviar uno solo de los dos
+     * campos para descuadrar el par: pasar a DOP sin tocar la tasa, o cambiar
+     * la tasa sin tocar la moneda. Se resuelve el par completo mezclando lo que
+     * llega con lo que ya habia, y se valida eso.
+     */
+    const currencyId = input.currencyId ?? purchase.currencyId;
+    const exchangeRate = input.exchangeRate ?? purchase.exchangeRate;
+
+    const currency = await this.catalog.findCurrencyById(currencyId);
+    if (currency === null) {
+      return err(new CurrencyNotFoundError(currencyId));
+    }
+    if (!isExchangeRateConsistent(currency.code, exchangeRate)) {
+      return err(new InconsistentExchangeRateError(currency.code, exchangeRate));
     }
 
     await this.purchases.update(input.purchaseId, {
