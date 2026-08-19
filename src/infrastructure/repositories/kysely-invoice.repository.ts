@@ -47,6 +47,7 @@ function mapCreditNote(row: Selectable<CreditNotesTable>): CreditNote {
   return {
     id: row.id,
     invoiceId: row.invoice_id,
+    saleItemId: row.sale_item_id,
     ncfNumber: row.ncf_number,
     reason: row.reason,
     amount: toNumber(row.amount),
@@ -68,7 +69,7 @@ type InvoiceDetailRow = Selectable<InvoicesTable> & {
   currency_code: string;
   client_name: string;
   client_document_number: string;
-  chassis_number: string;
+  chassis_numbers: string[] | null;
   created_by_name: string;
 };
 
@@ -278,6 +279,7 @@ export class KyselyInvoiceRepository implements InvoiceRepository {
       .insertInto('credit_notes')
       .values({
         invoice_id: data.invoiceId,
+        sale_item_id: data.saleItemId,
         reason: data.reason,
         amount: data.amount,
         created_by: data.createdBy,
@@ -330,12 +332,28 @@ export class KyselyInvoiceRepository implements InvoiceRepository {
     return round2(toNumber(row?.total ?? 0));
   }
 
+  async creditedAmountForSaleItem(saleItemId: string): Promise<number> {
+    const row = await this.db
+      .selectFrom('credit_notes')
+      .select((eb) => eb.fn.sum<number>('amount').as('total'))
+      .where('sale_item_id', '=', saleItemId)
+      .where('status', '=', 'issued')
+      .executeTakeFirst();
+
+    return round2(toNumber(row?.total ?? 0));
+  }
+
+  /**
+   * Ya no se une a `vehicles`: una venta puede llevar varios. El importe y los
+   * chasis salen de subconsultas sobre las lineas VIGENTES, que es tambien lo
+   * que evita que un JOIN duplique la factura una vez por vehiculo y desajuste
+   * el conteo de la paginacion.
+   */
   private baseJoin() {
     return this.db
       .selectFrom('invoices')
       .innerJoin('sales', 'sales.id', 'invoices.sale_id')
       .innerJoin('clients', 'clients.id', 'sales.client_id')
-      .innerJoin('vehicles', 'vehicles.id', 'sales.vehicle_id')
       .innerJoin('currencies', 'currencies.id', 'sales.currency_id')
       .innerJoin('users', 'users.id', 'invoices.created_by');
   }
@@ -343,13 +361,26 @@ export class KyselyInvoiceRepository implements InvoiceRepository {
   private detailColumns() {
     return [
       sql<string>`sales.sale_number`.as('sale_number'),
-      sql<number>`sales.sale_price`.as('sale_price'),
+      // TODAS las lineas, devueltas incluidas: es el importe que se facturo. Un
+      // comprobante emitido no encoge porque luego se devuelva un vehiculo; eso
+      // lo corrige la nota de credito, y `netAmount` resta una de otro. Con el
+      // total vigente, una devolucion se habria descontado dos veces.
+      sql<number>`(
+        SELECT COALESCE(SUM(si.sale_price), 0)
+        FROM sale_items si
+        WHERE si.sale_id = sales.id
+      )`.as('sale_price'),
       sql<string>`sales.sale_date`.as('sale_date'),
       sql<string>`sales.status`.as('sale_status'),
       sql<string>`currencies.code`.as('currency_code'),
       CLIENT_NAME.as('client_name'),
       sql<string>`clients.document_number`.as('client_document_number'),
-      sql<string>`vehicles.chassis_number`.as('chassis_number'),
+      sql<string[] | null>`(
+        SELECT array_agg(v.chassis_number ORDER BY si.created_at)
+        FROM sale_items si
+        JOIN vehicles v ON v.id = si.vehicle_id
+        WHERE si.sale_id = sales.id
+      )`.as('chassis_numbers'),
       USER_NAME.as('created_by_name'),
     ] as const;
   }
@@ -371,7 +402,7 @@ export class KyselyInvoiceRepository implements InvoiceRepository {
       saleStatus: row.sale_status,
       clientName: row.client_name,
       clientDocumentNumber: row.client_document_number,
-      vehicleChassisNumber: row.chassis_number,
+      vehicleChassisNumbers: row.chassis_numbers ?? [],
       createdByName: row.created_by_name,
       creditNotes,
       creditedAmount: credited,

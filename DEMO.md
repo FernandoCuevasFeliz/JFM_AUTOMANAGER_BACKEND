@@ -68,7 +68,10 @@ Leyenda: ✅ puede · ❌ recibe `403 FORBIDDEN`
 | Ver cotizaciones, reservas y ventas | ✅ | ✅ | ❌ | ✅ |
 | Crear cotizaciones y reservas | ✅ | ✅ | ❌ | ❌ |
 | Registrar ventas y cobros | ✅ | ✅ | ❌ | ❌ |
+| Añadir o quitar vehículos de una venta | ✅ | ✅ | ❌ | ❌ |
+| Devolver un vehículo vendido | ✅ | ✅ | ❌ | ❌ |
 | Registrar cobros | ✅ | ✅ | ❌ | ✅ |
+| Registrar reembolsos | ✅ | ✅ | ❌ | ✅ |
 | Eliminar ventas | ✅ | ❌ | ❌ | ❌ |
 | **Facturación (e-CF)** |
 | Ver comprobantes | ✅ | ✅ | ❌ | ✅ |
@@ -76,7 +79,7 @@ Leyenda: ✅ puede · ❌ recibe `403 FORBIDDEN`
 | Registrar emisión/rechazo de la DGII | ✅ | ❌ | ❌ | ✅ |
 | Emitir notas de crédito | ✅ | ❌ | ❌ | ✅ |
 | **Reportes** |
-| Resúmenes mensuales (ventas, vendedores, gastos, inventario, comprobantes) | ✅ | ✅ | ✅ | ✅ |
+| Resúmenes mensuales (ventas, vendedores, devoluciones, gastos, inventario, comprobantes) | ✅ | ✅ | ✅ | ✅ |
 | Rentabilidad por vehículo (costo real y margen) | ✅ | ❌ | ✅ | ✅ |
 | Cuentas por cobrar (saldo por venta) | ✅ | ✅ | ❌ | ✅ |
 
@@ -119,30 +122,45 @@ curl -s -o /dev/null -w '%{http_code}\n' $API/expenses -H "authorization: Bearer
 ```
 
 ```bash
+# devolver un vehículo mueve inventario e importe: es sales:write, no payments:write.
+# contabilidad emite la nota de crédito; ventas ejecuta la devolución.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/sales/$SALE/items/$ITEM/return \
+  -H "authorization: Bearer $CONTA" -H 'content-type: application/json' \
+  -d '{"reason":"prueba"}'                                                                        # 403
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $API/sales/$SALE/refunds \
+  -H "authorization: Bearer $INVENTARIO" -H 'content-type: application/json' -d '{}'              # 403
+```
+
+```bash
 # los resúmenes son para todos, el detalle sensible no:
 # ventas no ve márgenes, inventario no ve saldos de clientes
 curl -s -o /dev/null -w '%{http_code}\n' $API/reports/sales-monthly -H "authorization: Bearer $INVENTARIO"          # 200
 curl -s -o /dev/null -w '%{http_code}\n' $API/reports/vehicle-profitability -H "authorization: Bearer $VENTAS"      # 403
 curl -s -o /dev/null -w '%{http_code}\n' $API/reports/accounts-receivable -H "authorization: Bearer $INVENTARIO"    # 403
 curl -s -o /dev/null -w '%{http_code}\n' $API/reports/accounts-receivable -H "authorization: Bearer $CONTA"         # 200
+curl -s -o /dev/null -w '%{http_code}\n' $API/reports/returns-monthly -H "authorization: Bearer $VENTAS"            # 200
 ```
 
 ---
 
 ## 4. Datos cargados
 
-Estado real del despliegue, consultado al escribir este documento:
+Lo que deja `scripts/seed-demo.mjs` sobre una base recién migrada, verificado ejecutándolo:
 
 | Recurso | Cantidad |
 |---|---|
-| Vehículos | 14 |
-| Clientes | 5 |
+| Vehículos | 12 |
+| Clientes | 6 |
 | Proveedores | 3 |
 | Compras | 3 |
-| Gastos | 15 |
-| Cotizaciones | 8 |
-| Reservas | 2 |
-| Ventas | 4 |
+| Gastos | 12 |
+| Cotizaciones | 5 |
+| Reservas | 1 |
+| Ventas | 5 |
+
+> El despliegue de Render sigue corriendo un commit anterior y todavía muestra las cifras viejas
+> (14 vehículos, 4 ventas, sin flotilla ni devoluciones). Las de esta tabla son las que tendrá en
+> cuanto se vuelva a desplegar y sembrar.
 
 **Inventario por estado** — hay al menos un vehículo en cada uno, para poder ver todas las
 transiciones:
@@ -150,16 +168,18 @@ transiciones:
 | Estado | Unidades |
 |---|---|
 | `in_transit` (en tránsito) | 2 |
-| `in_inventory` (disponible) | 5 |
+| `in_inventory` (disponible) | 1 |
 | `reserved` (apartado) | 1 |
-| `sold` (vendido) | 4 |
+| `sold` (vendido) | 6 |
 | `in_repair` (en taller) | 1 |
 | `unavailable` (no disponible) | 1 |
 
-**Ventas:** 4 · facturado 9 610 000 DOP · cobrado 6 520 000 · pendiente 3 090 000.
+**Ventas:** 5 · facturado 11 430 000 DOP · cobrado 5 500 000.
 
 Hay ventas en varios estados (completada, en proceso con saldo, cancelada) para ejercitar los
-cobros, el cierre y la reventa tras cancelación.
+cobros, el cierre y la reventa tras cancelación. Una de ellas es una **venta de flotilla**: tres
+vehículos en un solo documento, con uno devuelto y su reembolso registrado. Sirve para ver de un
+vistazo lo que el modelo de un vehículo por venta no podía representar.
 
 ---
 
@@ -171,9 +191,14 @@ cobros, el cierre y la reventa tras cancelación.
 2. **Cambia a `ventas`.** Crea una cotización sobre un vehículo `in_inventory`, apruébala,
    conviértela en reserva (el vehículo pasa a `reserved` solo) y luego en venta (pasa a `sold`).
    Registra un cobro parcial y comprueba que `POST /sales/:id/complete` da `422` hasta saldarla.
-3. **Cambia a `contabilidad`.** Registra un gasto sobre un vehículo vendido y consulta
+3. **Sigue como `ventas` y abre la venta de flotilla** (la de tres vehículos). Añade una unidad más
+   con `POST /sales/:id/items`, corrige su precio con `PATCH /sales/:id/items/:itemId` y devuelve una
+   con `POST /sales/:id/items/:itemId/return`: el total de la venta baja solo, el vehículo vuelve a
+   inventario y el resto de la venta no se toca. Registra el reembolso con `POST /sales/:id/refunds`
+   y mira cómo el saldo pendiente vuelve a subir.
+4. **Cambia a `contabilidad`.** Registra un gasto sobre un vehículo vendido y consulta
    `GET /expenses/vehicle-cost/:vehicleId`: verás el costo real consolidado en pesos y el margen.
-4. **Vuelve a `admin`** para lo que los demás no pueden: administrar usuarios y eliminar registros.
+5. **Vuelve a `admin`** para lo que los demás no pueden: administrar usuarios y eliminar registros.
 
 ---
 
@@ -194,8 +219,12 @@ Cuando esté desplegado, el recorrido es:
 3. Si la DGII lo rechaza: `POST /invoices/:id/reject` con el motivo, corrige, y `POST /:id/retry`.
 4. Para corregir o anular una factura emitida: `POST /invoices/:id/credit-notes` y luego
    `.../issue`. Cuando las notas cubren el importe completo, **la factura se anula sola**.
-5. Comprueba la regla que las une: intenta `POST /sales/:id/cancel` sobre una venta facturada.
-   Devuelve `422` explicando que primero hay que emitir la nota de crédito.
+5. Comprueba las dos reglas que unen venta y comprobante:
+   - `POST /sales/:id/cancel` sobre una venta facturada devuelve `422`: primero hay que anular el
+     comprobante con notas de crédito que cubran su importe;
+   - devolver un vehículo de una venta facturada también devuelve `422` hasta que exista una nota de
+     crédito **por el importe de esa línea** (`POST /invoices/:id/credit-notes` con `saleItemId`).
+     El importe de la factura no baja al devolver: lo que baja es su `netAmount`.
 
 El script `scripts/seed-demo.mjs` ya incluye cuatro comprobantes de ejemplo (uno emitido, uno con
 nota de crédito parcial, uno rechazado y uno pendiente); los creará en cuanto el módulo esté

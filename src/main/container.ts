@@ -46,6 +46,7 @@ import { GetFiscalDocumentsReportUseCase } from '../application/reports/get-fisc
 import { GetInventoryStatusReportUseCase } from '../application/reports/get-inventory-status-report.use-case';
 import { GetMonthlyExpensesReportUseCase } from '../application/reports/get-monthly-expenses-report.use-case';
 import {
+  GetMonthlyReturnsReportUseCase,
   GetMonthlySalesReportUseCase,
   GetSalesBySalespersonReportUseCase,
 } from '../application/reports/get-sales-reports.use-case';
@@ -56,6 +57,7 @@ import { ExpireReservationsUseCase } from '../application/reservations/expire-re
 import { GetReservationUseCase } from '../application/reservations/get-reservation.use-case';
 import { ListReservationsUseCase } from '../application/reservations/list-reservations.use-case';
 import { UpdateReservationUseCase } from '../application/reservations/update-reservation.use-case';
+import { AddSaleItemUseCase } from '../application/sales/add-sale-item.use-case';
 import { CancelSaleUseCase } from '../application/sales/cancel-sale.use-case';
 import { CompleteSaleUseCase } from '../application/sales/complete-sale.use-case';
 import { CreateSaleUseCase } from '../application/sales/create-sale.use-case';
@@ -63,7 +65,11 @@ import { DeleteSaleUseCase } from '../application/sales/delete-sale.use-case';
 import { GetSaleUseCase } from '../application/sales/get-sale.use-case';
 import { ListSalePaymentsUseCase } from '../application/sales/list-sale-payments.use-case';
 import { GetSalesSummaryUseCase, ListSalesUseCase } from '../application/sales/list-sales.use-case';
+import { RegisterRefundUseCase } from '../application/sales/register-refund.use-case';
 import { RegisterSalePaymentUseCase } from '../application/sales/register-sale-payment.use-case';
+import { RemoveSaleItemUseCase } from '../application/sales/remove-sale-item.use-case';
+import { ReturnSaleItemUseCase } from '../application/sales/return-sale-item.use-case';
+import { UpdateSaleItemUseCase } from '../application/sales/update-sale-item.use-case';
 import { UpdateSaleUseCase } from '../application/sales/update-sale.use-case';
 import type { AuditDependencies } from '../application/shared/with-audit';
 import { withAudit } from '../application/shared/with-audit';
@@ -499,7 +505,7 @@ export function buildContainer(): Container {
       audit,
     ),
     cancelSale: withAudit(
-      new CancelSaleUseCase(unitOfWork, sales, invoices),
+      new CancelSaleUseCase(unitOfWork, sales, invoices, clock),
       { table: 'sales', action: 'update', recordIdFromInput: (input) => input.saleId },
       audit,
     ),
@@ -508,12 +514,43 @@ export function buildContainer(): Container {
       { table: 'sales', action: 'delete', recordIdFromInput: (input) => input.saleId },
       audit,
     ),
+    // Las lineas se auditan sobre `sale_items`, no sobre `sales`: quien agrego o
+    // devolvio un vehiculo es una pregunta distinta de quien toco la venta.
+    addSaleItem: withAudit(
+      new AddSaleItemUseCase(unitOfWork, sales),
+      { table: 'sale_items', action: 'insert', recordIdFromInput: (input) => input.saleId },
+      audit,
+    ),
+    updateSaleItem: withAudit(
+      new UpdateSaleItemUseCase(sales),
+      { table: 'sale_items', action: 'update', recordIdFromInput: (input) => input.saleItemId },
+      audit,
+    ),
+    removeSaleItem: withAudit(
+      new RemoveSaleItemUseCase(unitOfWork, sales),
+      { table: 'sale_items', action: 'delete', recordIdFromInput: (input) => input.saleItemId },
+      audit,
+    ),
+    returnSaleItem: withAudit(
+      new ReturnSaleItemUseCase(unitOfWork, sales, invoices, clock),
+      { table: 'sale_items', action: 'update', recordIdFromInput: (input) => input.saleItemId },
+      audit,
+    ),
     registerSalePayment: withAudit(
       new RegisterSalePaymentUseCase(unitOfWork, catalog),
       {
         table: 'sale_payments',
         action: 'insert',
         recordIdFromOutput: (output) => output.payment.id,
+      },
+      audit,
+    ),
+    registerRefund: withAudit(
+      new RegisterRefundUseCase(unitOfWork, catalog),
+      {
+        table: 'refunds',
+        action: 'insert',
+        recordIdFromOutput: (output) => output.refund.id,
       },
       audit,
     ),
@@ -549,7 +586,7 @@ export function buildContainer(): Container {
       audit,
     ),
     createCreditNote: withAudit(
-      new CreateCreditNoteUseCase(invoices),
+      new CreateCreditNoteUseCase(invoices, sales),
       { table: 'credit_notes', action: 'insert', recordIdFromOutput: (note) => note.id },
       audit,
     ),
@@ -580,6 +617,7 @@ export function buildContainer(): Container {
     accountsReceivable: new GetAccountsReceivableUseCase(reports),
     monthlySales: new GetMonthlySalesReportUseCase(reports),
     salesBySalesperson: new GetSalesBySalespersonReportUseCase(reports),
+    monthlyReturns: new GetMonthlyReturnsReportUseCase(reports),
     monthlyExpenses: new GetMonthlyExpensesReportUseCase(reports),
     inventoryStatus: new GetInventoryStatusReportUseCase(reports),
     fiscalDocuments: new GetFiscalDocumentsReportUseCase(reports),

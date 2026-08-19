@@ -77,6 +77,7 @@ interface Escrituras {
   reservationStatus: Array<{ id: string; status: string }>;
   quotationStatus: Array<{ id: string; status: string }>;
   pagos: Array<{ amount: number; currencyId: string }>;
+  lineas: Array<{ vehicleId: string; salePrice: number }>;
   ventaCreada: Record<string, unknown> | null;
 }
 
@@ -91,6 +92,7 @@ function montar(opciones: {
     reservationStatus: [],
     quotationStatus: [],
     pagos: [],
+    lineas: [],
     ventaCreada: null,
   };
 
@@ -112,6 +114,10 @@ function montar(opciones: {
       create: async (nueva: Record<string, unknown>) => {
         escrituras.ventaCreada = nueva;
         return { id: 'sale-nueva', ...nueva };
+      },
+      addItem: async (saleId: string, linea: { vehicleId: string; salePrice: number }) => {
+        escrituras.lineas.push(linea);
+        return { id: `item-${escrituras.lineas.length}`, saleId, ...linea, status: 'active' };
       },
       addPayment: async (pago: { amount: number; currencyId: string }) => {
         escrituras.pagos.push({ amount: pago.amount, currencyId: pago.currencyId });
@@ -161,9 +167,8 @@ function montar(opciones: {
 
 const VENTA_BASE = {
   clientId: 'cli-1',
-  vehicleId: 'veh-1',
+  items: [{ vehicleId: 'veh-1', salePrice: 2_000_000 }],
   currencyId: 'cur-dop',
-  salePrice: 2_000_000,
   exchangeRate: 1,
   saleDate: '2026-03-10',
   salespersonId: 'user-1',
@@ -251,7 +256,7 @@ describe('CreateSaleUseCase · precio contra deposito', () => {
 
     const result = await useCase.execute({
       ...VENTA_BASE,
-      salePrice: 100_000,
+      items: [{ vehicleId: 'veh-1', salePrice: 100_000 }],
       reservationId: 'res-1',
       quotationId: null,
     });
@@ -270,7 +275,7 @@ describe('CreateSaleUseCase · precio contra deposito', () => {
     const result = await useCase.execute({
       ...VENTA_BASE,
       currencyId: 'cur-usd',
-      salePrice: 30_000,
+      items: [{ vehicleId: 'veh-1', salePrice: 30_000 }],
       exchangeRate: 60,
       reservationId: 'res-1',
       quotationId: null,
@@ -291,7 +296,7 @@ describe('CreateSaleUseCase · precio contra deposito', () => {
     const result = await useCase.execute({
       ...VENTA_BASE,
       currencyId: 'cur-usd',
-      salePrice: 1_000,
+      items: [{ vehicleId: 'veh-1', salePrice: 1_000 }],
       exchangeRate: 60,
       reservationId: 'res-1',
       quotationId: null,

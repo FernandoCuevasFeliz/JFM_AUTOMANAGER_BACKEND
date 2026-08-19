@@ -40,6 +40,8 @@ export interface VehicleProfitability {
   readonly totalCostConverted: number;
   /** Todo lo relativo a la venta es null mientras la unidad no se venda. */
   readonly saleId: string | null;
+  /** Linea de la venta que contiene esta unidad. */
+  readonly saleItemId: string | null;
   readonly saleNumber: string | null;
   readonly saleStatus: SaleStatus | null;
   readonly saleDate: string | null;
@@ -61,14 +63,20 @@ export interface AccountReceivable {
   readonly clientId: string;
   readonly clientName: string;
   readonly clientPhone: string;
-  readonly vehicleId: string;
-  readonly chassisNumber: string;
   readonly salespersonId: string;
   readonly salespersonName: string;
   readonly currencyCode: string;
   readonly exchangeRate: number;
+  /** Vehiculos vigentes y devueltos de la venta. */
+  readonly activeItems: number;
+  readonly returnedItems: number;
+  /** Chasis de los vehiculos vigentes. */
+  readonly chassisNumbers: readonly string[];
+  /** Total vigente: suma de las lineas activas. */
   readonly salePrice: number;
   readonly totalPaid: number;
+  readonly totalRefunded: number;
+  /** Lineas vigentes menos lo cobrado neto de reembolsos. */
   readonly pendingBalance: number;
   readonly pendingBalanceConverted: number;
   /** Dias transcurridos desde la fecha de la venta. */
@@ -80,7 +88,9 @@ export interface AccountReceivable {
 export interface MonthlySalesReportRow {
   readonly month: ReportMonth;
   readonly currencyCode: string;
+  /** Documentos de venta. Con varias unidades por venta ya no es el conteo de vehiculos. */
   readonly salesCount: number;
+  readonly vehiclesCount: number;
   readonly totalAmount: number;
   readonly totalAmountConverted: number;
 }
@@ -88,6 +98,27 @@ export interface MonthlySalesReportRow {
 export interface SalespersonReportRow extends MonthlySalesReportRow {
   readonly salespersonId: string;
   readonly salespersonName: string;
+}
+
+// --- Devoluciones -----------------------------------------------------------
+
+/**
+ * Tasa de devolucion: unidades que volvieron y cuanto valian, por mes de la
+ * devolucion. Solo devoluciones PARCIALES —la venta sigue viva—; una venta
+ * cancelada entera es otro evento del negocio y mezclarlos ocultaria las dos
+ * cifras.
+ */
+export interface MonthlyReturnsReportRow {
+  readonly month: ReportMonth;
+  readonly currencyCode: string;
+  readonly returnedCount: number;
+  /** Ventas distintas afectadas por una devolucion en el mes. */
+  readonly salesCount: number;
+  readonly totalAmount: number;
+  readonly totalAmountConverted: number;
+  /** Dinero efectivamente devuelto al cliente por esas unidades. */
+  readonly totalRefunded: number;
+  readonly totalRefundedConverted: number;
 }
 
 // --- Gastos -----------------------------------------------------------------

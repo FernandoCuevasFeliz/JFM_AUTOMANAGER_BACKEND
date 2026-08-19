@@ -4,6 +4,7 @@ import type {
   FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
+  MonthlyReturnsReportRow,
   MonthlySalesReportRow,
   SalespersonReportRow,
   VehicleProfitability,
@@ -42,6 +43,17 @@ function monthStart(date: string) {
 /** Los codigos de moneda viajan normalizados en mayusculas. */
 function normalizeCurrency(code: string): string {
   return code.trim().toUpperCase();
+}
+
+/**
+ * La vista concatena los chasis con ", " para poder buscarlos con un ILIKE; la
+ * API los devuelve como lista, que es lo que la interfaz necesita pintar.
+ */
+function splitChassis(value: string | null): string[] {
+  if (value === null || value.trim().length === 0) {
+    return [];
+  }
+  return value.split(', ');
 }
 
 /**
@@ -119,6 +131,7 @@ export class KyselyReportRepository implements ReportRepository {
       expensesTotalConverted: toNumber(row.expenses_total_converted),
       totalCostConverted: toNumber(row.total_cost_converted),
       saleId: row.sale_id,
+      saleItemId: row.sale_item_id,
       saleNumber: row.sale_number,
       saleStatus: row.sale_status,
       saleDate: row.sale_date,
@@ -144,7 +157,9 @@ export class KyselyReportRepository implements ReportRepository {
         eb.or([
           eb('sale_number', 'ilike', pattern),
           eb('client_name', 'ilike', pattern),
-          eb('chassis_number', 'ilike', pattern),
+          // La vista concatena los chasis vigentes de la venta: buscar sobre el
+          // texto encuentra la venta cualquiera que sea el vehiculo que la lleve.
+          eb('chassis_numbers', 'ilike', pattern),
         ]),
       );
     }
@@ -188,14 +203,16 @@ export class KyselyReportRepository implements ReportRepository {
       clientId: row.client_id,
       clientName: row.client_name,
       clientPhone: row.client_phone,
-      vehicleId: row.vehicle_id,
-      chassisNumber: row.chassis_number,
       salespersonId: row.salesperson_id,
       salespersonName: row.salesperson_name,
       currencyCode: row.currency_code,
       exchangeRate: toNumber(row.exchange_rate),
+      activeItems: Number(row.active_items),
+      returnedItems: Number(row.returned_items),
+      chassisNumbers: splitChassis(row.chassis_numbers),
       salePrice: toNumber(row.sale_price),
       totalPaid: toNumber(row.total_paid),
+      totalRefunded: toNumber(row.total_refunded),
       pendingBalance: toNumber(row.pending_balance),
       pendingBalanceConverted: toNumber(row.pending_balance_converted),
       daysOutstanding: Number(row.days_outstanding),
@@ -223,8 +240,36 @@ export class KyselyReportRepository implements ReportRepository {
       month: row.month,
       currencyCode: row.currency_code,
       salesCount: Number(row.sales_count),
+      vehiclesCount: Number(row.vehicles_count),
       totalAmount: toNumber(row.total_amount),
       totalAmountConverted: toNumber(row.total_amount_converted),
+    }));
+  }
+
+  async monthlyReturns(filters: MonthlyRangeFilters): Promise<MonthlyReturnsReportRow[]> {
+    let query = this.db.selectFrom('vw_returns_summary_monthly').selectAll();
+
+    if (filters.dateFrom !== undefined) {
+      query = query.where('month', '>=', monthStart(filters.dateFrom));
+    }
+    if (filters.dateTo !== undefined) {
+      query = query.where('month', '<=', monthStart(filters.dateTo));
+    }
+    if (filters.currencyCode !== undefined) {
+      query = query.where('currency_code', '=', normalizeCurrency(filters.currencyCode));
+    }
+
+    const rows = await query.orderBy('month', 'desc').orderBy('currency_code', 'asc').execute();
+
+    return rows.map((row) => ({
+      month: row.month,
+      currencyCode: row.currency_code,
+      returnedCount: Number(row.returned_count),
+      salesCount: Number(row.sales_count),
+      totalAmount: toNumber(row.total_amount),
+      totalAmountConverted: toNumber(row.total_amount_converted),
+      totalRefunded: toNumber(row.total_refunded),
+      totalRefundedConverted: toNumber(row.total_refunded_converted),
     }));
   }
 
@@ -257,6 +302,7 @@ export class KyselyReportRepository implements ReportRepository {
       salespersonName: row.salesperson_name,
       currencyCode: row.currency_code,
       salesCount: Number(row.sales_count),
+      vehiclesCount: Number(row.vehicles_count),
       totalAmount: toNumber(row.total_amount),
       totalAmountConverted: toNumber(row.total_amount_converted),
     }));

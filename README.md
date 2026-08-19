@@ -85,7 +85,7 @@ createdb ejgh_autoimport
 npm run db:migrate
 ```
 
-Aplica siete migraciones:
+Aplica ocho migraciones:
 
 1. **`001_initial_schema`** — transcripción literal de `schema_ejgh_autoimport.sql`: extensión
    `pgcrypto`, los 8 ENUM, las 20 tablas, índices y los triggers de `updated_at`.
@@ -99,10 +99,14 @@ Aplica siete migraciones:
    `fiscal_doc_status_enum`, y las tablas `invoices` y `credit_notes`.
 7. **`007_report_views`** — las siete vistas de reporte (`vw_*`). No crea tablas ni columnas: son
    consultas con nombre sobre lo que ya existe.
+8. **`008_sale_items_and_refunds`** — parte `sales` en cabecera y detalle (`sale_items`), añade
+   `refunds` y `credit_notes.sale_item_id`, y redefine cinco de las vistas sobre el detalle más una
+   nueva de devoluciones.
 
 De la tercera a la sexta modifican el esquema entregado; el porqué de cada una está en
 [Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado). La séptima no lo
-modifica: una vista no altera el modelo de datos.
+modifica: una vista no altera el modelo de datos. La octava sí lo modifica, y a fondo:
+[Venta de varios vehículos y reembolsos](#venta-de-varios-vehículos-y-reembolsos-migración-008).
 
 Para revertir la última migración:
 
@@ -765,7 +769,7 @@ al recibir, no el sistema al sumar.
 
 ### Reportes: vistas SQL, no tablas nuevas (migración 007)
 
-El módulo de reportes no agrega ni una tabla ni una columna. Son siete `CREATE VIEW` sobre el
+El módulo de reportes no agrega ni una tabla ni una columna. Son ocho `CREATE VIEW` sobre el
 esquema existente, así que **la 3FN queda intacta**: no hay ningún dato duplicado que pueda quedar
 desincronizado con su origen, y un reporte nunca puede contradecir a la operación porque lee de
 ella.
@@ -773,12 +777,20 @@ ella.
 | Vista | Qué responde |
 |---|---|
 | `vw_vehicle_profitability` | costo real (compra + gastos) vs. precio de venta y margen, por unidad |
-| `vw_accounts_receivable` | saldo pendiente por venta (`sale_price` − pagos), sin las canceladas |
-| `vw_sales_summary_monthly` | ventas completadas por mes y moneda |
+| `vw_accounts_receivable` | saldo por venta (líneas vigentes − cobros + reembolsos), sin canceladas |
+| `vw_sales_summary_monthly` | ventas completadas por mes y moneda, con ventas **y** unidades |
 | `vw_sales_by_salesperson` | lo mismo, abierto por vendedor: ranking de desempeño |
+| `vw_returns_summary_monthly` | devoluciones parciales por mes: unidades, valor y reembolsos |
 | `vw_expenses_summary_monthly` | gastos por mes, categoría, alcance y moneda |
 | `vw_inventory_status_summary` | conteo de vehículos activos por `status` |
 | `vw_fiscal_documents_summary` | comprobantes por mes, tipo y estado — control ante la DGII |
+
+Hay además una vista auxiliar, `vw_sale_totals`, que no se expone por la API: solo nombra una vez la
+suma de las líneas de cada venta para no repetirla en cuatro reportes.
+
+> **Cinco de ellas las redefine la migración 008**, que baja y vuelve a crear las que dependían de
+> `sales.vehicle_id` / `sales.sale_price`. Una migración ya escrita no se edita, así que el estado
+> final de esas vistas está en `008_sale_items_and_refunds.ts`, no en la 007.
 
 Tres criterios comunes a todas: filtran el borrado lógico (un registro archivado no aparece en un
 reporte), exponen cada importe en la moneda del documento **y** convertido con la tasa de ese mismo
@@ -799,6 +811,57 @@ Si alguna se vuelve lenta con el volumen, se convierte puntualmente a `MATERIALI
 refresco programado, sin tocar el resto del esquema. La única que cambiaría de semántica al
 materializarse es `vw_accounts_receivable`: su `daysOutstanding` se calcula contra `CURRENT_DATE` y
 quedaría congelado en la fecha del último refresco.
+
+### Venta de varios vehículos y reembolsos (migración 008)
+
+El esquema entregado ataba una venta a **un** vehículo: `sales.vehicle_id` y `sales.sale_price`. Eso
+impedía vender una flotilla en un solo documento y, peor, obligaba a **cancelar la venta entera**
+para devolver una unidad. La migración 008 parte `sales` en cabecera y detalle, igual que ya estaban
+`purchases` / `purchase_items`:
+
+```
+sales (quién, cuándo, en qué moneda)
+  ├── sale_items    (qué vehículos y a qué precio cada uno)
+  ├── sale_payments (dinero que entró)
+  └── refunds       (dinero que salió de vuelta al cliente)
+```
+
+**El importe de una venta deja de ser una columna.** Es `SUM(sale_items.sale_price)` de las líneas
+`active`. No es una preferencia de estilo: guardarlo además en la tabla crearía dos fuentes del mismo
+dato que se desincronizan en cuanto se devuelve un vehículo. Devolver una unidad no reescribe ningún
+importe histórico —la línea simplemente deja de sumar—, y por eso la factura ya emitida no se
+descuadra.
+
+**`refunds` es una tabla aparte, no un pago negativo.** Meter importes negativos en `sale_payments`
+habría roto su `CHECK (amount > 0)` y, sobre todo, su significado: esa tabla responde *cuánto entró*,
+no *cuánto neto*. El saldo de la venta se mide contra el cobrado neto (`pagos − reembolsos`), así que
+un reembolso vuelve a abrir saldo pendiente, que es exactamente lo que ocurre en la realidad.
+
+**`credit_notes.sale_item_id`** ata la nota de crédito al vehículo devuelto. Con ella, acreditar una
+unidad de una venta de tres ya no obliga a anular el comprobante completo, y el techo de la nota pasa
+a ser el precio de esa unidad.
+
+#### Dos desviaciones deliberadas del documento de esquema
+
+1. **El `UNIQUE` de `sale_items.vehicle_id` es PARCIAL.** El documento lo pide a secas; aplicado tal
+   cual, un vehículo cuya venta se canceló no podría volver a venderse **nunca**, que es justo el
+   defecto que arregló la migración 003. Aquí el índice es
+   `ON sale_items(vehicle_id) WHERE status = 'active'`, y cancelar una venta marca sus líneas como
+   `returned` — los vehículos vuelven a inventario, que es lo que cancelar significa. La regla real
+   del negocio queda igual de garantizada, sin perder trazabilidad.
+
+2. **`refunds` lleva `exchange_rate`.** El documento no la trae. Sin ella, un reembolso en dólares no
+   se puede consolidar a pesos con el mismo criterio de costo histórico que usa el resto del sistema;
+   es la misma razón por la que la migración 005 se la añadió a `expenses`. La tasa es la del día en
+   que sale el dinero, no la de la venta.
+
+#### El traslado de los datos
+
+La migración convierte cada venta existente en su única línea antes de soltar las columnas viejas.
+Las ventas canceladas o archivadas nacen con la línea en `returned`, para que el índice parcial
+refleje el estado real y su vehículo siga siendo revendible. `down()` reconstruye el modelo anterior;
+si alguna venta llegó a tener más de un vehículo solo puede recuperar uno, y los reembolsos se
+pierden porque antes no había dónde guardarlos.
 
 ### Categorías de gasto sembradas
 
@@ -821,9 +884,9 @@ Ver `src/infrastructure/database/pg-types.ts`.
 
 Comprobado contra una base PostgreSQL real:
 
-- las **siete** migraciones aplican en orden y el seed crea el administrador; el `UNIQUE` de
-  `sales.vehicle_id` queda sustituido por `uq_sales_vehicle_active` y el único `UNIQUE` que
-  permanece en `sales` es el de `sale_number`;
+- las **ocho** migraciones aplican en orden y el seed crea el administrador; `sales` queda sin
+  `vehicle_id` ni `sale_price` y su único `UNIQUE` es el de `sale_number`; la unicidad del vehículo
+  vive ahora en `uq_sale_items_vehicle_active`;
 - el ciclo comercial completo funciona de punta a punta: marca → vehículo → proveedor → compra →
   recepción a inventario → cliente → cotización → reserva → venta → pagos → cierre;
 - **reventa tras cancelación**: cancelar una venta devuelve el vehículo a inventario y permite
@@ -838,10 +901,21 @@ Comprobado contra una base PostgreSQL real:
   inválidas, saldos excedidos, `scope` incoherente y tasas incoherentes, 400 en errores de forma);
 - RBAC bloquea a `ventas` la creación de vehículos y la administración de usuarios;
 - `audit_logs` se llena solo, sin `password_hash`;
-- **reportes**: las siete vistas se crean y se revierten (`007` baja y vuelve a subir sin residuos),
-  y los siete endpoints devuelven datos coherentes con el juego de demostración: el margen por
+- **reportes**: las ocho vistas se crean y se revierten sin residuos (`007` y `008` bajan y vuelven a
+  subir), y los ocho endpoints devuelven datos coherentes con el juego de demostración: el margen por
   vehículo cuadra con la compra en USD más los gastos convertidos, la venta cancelada no aparece ni
   en cuentas por cobrar ni consumiendo la unidad, el reporte mensual cuenta solo las ventas
   completadas, `?dateFrom=2026-07-15` devuelve julio completo, y el inventario devuelve los seis
   estados aunque alguno esté en cero;
-- `npm run typecheck`, `npm run build` y `npm test` (110 pruebas) pasan en limpio.
+- **varios vehículos por venta**: una venta de tres unidades por 3 000 000 con un cobro de 2 000 000
+  pasa a 2 100 000 al devolver una de 900 000, y su saldo de 100 000 sube a 300 000 tras reembolsar
+  200 000; el vehículo devuelto vuelve a `in_inventory` y se revende en un documento nuevo sin borrar
+  nada; un reembolso mayor a lo cobrado devuelve 422;
+- **bloqueo fiscal de la devolución**: con la factura emitida, devolver el vehículo da 422 hasta que
+  se emite una nota de crédito por el importe de esa línea; una nota que supera el precio de la línea
+  se rechaza; tras la devolución la factura conserva su importe (1 800 000) y baja solo su
+  `netAmount` (800 000), sin descontar dos veces;
+- **traslado de datos**: sobre una base con el modelo anterior —incluida una venta cancelada del
+  mismo vehículo que una vigente— la migración 008 genera una línea por venta, marca `returned` las
+  de ventas canceladas y archivadas, y el índice único parcial acepta el caso sin conflicto;
+- `npm run typecheck`, `npm run build` y `npm test` (154 pruebas) pasan en limpio.

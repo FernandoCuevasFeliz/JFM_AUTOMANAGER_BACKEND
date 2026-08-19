@@ -57,6 +57,7 @@ export type PurchaseStatusEnum = 'pending' | 'in_transit' | 'received' | 'cancel
 export type QuotationStatusEnum = 'pending' | 'approved' | 'rejected' | 'expired' | 'converted';
 export type ReservationStatusEnum = 'active' | 'expired' | 'converted' | 'cancelled';
 export type SaleStatusEnum = 'in_process' | 'completed' | 'cancelled';
+export type SaleItemStatusEnum = 'active' | 'returned';
 export type ExpenseScopeEnum = 'general' | 'vehicle';
 export type AuditActionEnum = 'insert' | 'update' | 'delete';
 
@@ -318,15 +319,18 @@ export interface ReservationsTable {
   deleted_at: Timestamp | null;
 }
 
+/**
+ * Cabecera de la venta. No lleva vehiculo ni importe: desde la migracion 008
+ * ambos viven en `sale_items`, y el total de la venta es la suma de sus lineas
+ * `active`.
+ */
 export interface SalesTable {
   id: Generated<string>;
   sale_number: string;
   reservation_id: string | null;
   quotation_id: string | null;
   client_id: string;
-  vehicle_id: string;
   currency_id: string;
-  sale_price: Numeric;
   exchange_rate: GeneratedNumeric;
   sale_date: DateOnly;
   status: Generated<SaleStatusEnum>;
@@ -334,6 +338,20 @@ export interface SalesTable {
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
   deleted_at: Timestamp | null;
+}
+
+/** Detalle de la venta: un vehiculo por linea. */
+export interface SaleItemsTable {
+  id: Generated<string>;
+  sale_id: string;
+  vehicle_id: string;
+  sale_price: Numeric;
+  status: Generated<SaleItemStatusEnum>;
+  /** NOT NULL cuando `status = 'returned'` (lo impone un CHECK). */
+  returned_at: Timestamp | null;
+  return_reason: string | null;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface SalePaymentsTable {
@@ -345,6 +363,28 @@ export interface SalePaymentsTable {
   payment_date: DateOnly;
   reference_number: string | null;
   received_by: string;
+  created_at: GeneratedTimestamp;
+  updated_at: GeneratedTimestamp;
+}
+
+/**
+ * Dinero devuelto al cliente. Tabla aparte de `sale_payments` para no romper el
+ * `CHECK (amount > 0)` de aquella ni su significado: `sale_payments` responde
+ * "cuanto entro", no "cuanto neto".
+ */
+export interface RefundsTable {
+  id: Generated<string>;
+  sale_id: string;
+  /** NULL = reembolso general de la venta, no atado a una unidad devuelta. */
+  sale_item_id: string | null;
+  refund_method_id: string;
+  currency_id: string;
+  amount: Numeric;
+  /** Tasa del dia del reembolso, no la de la venta. */
+  exchange_rate: GeneratedNumeric;
+  refund_date: DateOnly;
+  reason: string;
+  processed_by: string;
   created_at: GeneratedTimestamp;
   updated_at: GeneratedTimestamp;
 }
@@ -370,6 +410,8 @@ export interface InvoicesTable {
 export interface CreditNotesTable {
   id: Generated<string>;
   invoice_id: string;
+  /** Vehiculo devuelto que la motiva; NULL = nota sobre el total de la factura. */
+  sale_item_id: string | null;
   ncf_number: string | null;
   reason: string;
   amount: Numeric;
@@ -410,6 +452,7 @@ export interface VwVehicleProfitabilityTable {
   total_cost_converted: number;
   /** NULL mientras el vehiculo no tenga una venta vigente. */
   sale_id: string | null;
+  sale_item_id: string | null;
   sale_number: string | null;
   sale_status: SaleStatusEnum | null;
   sale_date: string | null;
@@ -428,14 +471,20 @@ export interface VwAccountsReceivableTable {
   client_id: string;
   client_name: string;
   client_phone: string;
-  vehicle_id: string;
-  chassis_number: string;
   salesperson_id: string;
   salesperson_name: string;
   currency_code: string;
   exchange_rate: number;
+  /** Vehiculos vigentes y devueltos de la venta. */
+  active_items: number;
+  returned_items: number;
+  /** Chasis vigentes concatenados con ", "; NULL si no queda ninguno. */
+  chassis_numbers: string | null;
+  /** Total vigente: suma de las lineas `active`. */
   sale_price: number;
   total_paid: number;
+  total_refunded: number;
+  /** Lineas vigentes menos lo cobrado neto de reembolsos. */
   pending_balance: number;
   pending_balance_converted: number;
   days_outstanding: number;
@@ -445,7 +494,9 @@ export interface VwSalesSummaryMonthlyTable {
   /** Primer dia del mes (`YYYY-MM-01`). */
   month: string;
   currency_code: string;
+  /** Documentos de venta; con varios vehiculos por venta ya no coincide con `vehicles_count`. */
   sales_count: number;
+  vehicles_count: number;
   total_amount: number;
   total_amount_converted: number;
 }
@@ -456,8 +507,21 @@ export interface VwSalesBySalespersonTable {
   salesperson_name: string;
   currency_code: string;
   sales_count: number;
+  vehicles_count: number;
   total_amount: number;
   total_amount_converted: number;
+}
+
+/** Devoluciones parciales por mes (las ventas canceladas enteras no cuentan). */
+export interface VwReturnsSummaryMonthlyTable {
+  month: string;
+  currency_code: string;
+  returned_count: number;
+  sales_count: number;
+  total_amount: number;
+  total_amount_converted: number;
+  total_refunded: number;
+  total_refunded_converted: number;
 }
 
 export interface VwExpensesSummaryMonthlyTable {
@@ -505,8 +569,10 @@ export interface DB {
   purchases: PurchasesTable;
   quotations: QuotationsTable;
   refresh_tokens: RefreshTokensTable;
+  refunds: RefundsTable;
   reservations: ReservationsTable;
   roles: RolesTable;
+  sale_items: SaleItemsTable;
   sale_payments: SalePaymentsTable;
   sales: SalesTable;
   suppliers: SuppliersTable;
@@ -516,11 +582,12 @@ export interface DB {
   vehicle_models: VehicleModelsTable;
   vehicles: VehiclesTable;
 
-  // Vistas de reporte (migracion 007). Solo lectura.
+  // Vistas de reporte (migraciones 007 y 008). Solo lectura.
   vw_accounts_receivable: VwAccountsReceivableTable;
   vw_expenses_summary_monthly: VwExpensesSummaryMonthlyTable;
   vw_fiscal_documents_summary: VwFiscalDocumentsSummaryTable;
   vw_inventory_status_summary: VwInventoryStatusSummaryTable;
+  vw_returns_summary_monthly: VwReturnsSummaryMonthlyTable;
   vw_sales_by_salesperson: VwSalesBySalespersonTable;
   vw_sales_summary_monthly: VwSalesSummaryMonthlyTable;
   vw_vehicle_profitability: VwVehicleProfitabilityTable;

@@ -45,7 +45,13 @@ export const listInvoicesQuerySchema = paginationQuery.extend({
   dateTo: dateOnly.optional(),
 });
 
+/**
+ * `saleItemId` ata la nota al vehiculo devuelto: el techo pasa a ser el precio
+ * de esa unidad y no el de la factura entera. Sin el, la nota corrige el total,
+ * que es el comportamiento de siempre.
+ */
 export const createCreditNoteSchema = z.object({
+  saleItemId: uuid.nullable().optional().default(null),
   reason: requiredString(2000, 'El motivo de la nota de credito'),
   amount: positiveMoney,
 });

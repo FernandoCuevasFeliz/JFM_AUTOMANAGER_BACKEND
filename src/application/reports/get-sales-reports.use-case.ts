@@ -1,4 +1,5 @@
 import type {
+  MonthlyReturnsReportRow,
   MonthlySalesReportRow,
   SalespersonReportRow,
 } from '../../domain/reports/report.entity';
@@ -47,5 +48,29 @@ export class GetSalesBySalespersonReportUseCase
     input: SalesBySalespersonReportInput,
   ): Promise<Result<SalespersonReportRow[], DomainError>> {
     return ok(await this.reports.salesBySalesperson(input.filters));
+  }
+}
+
+export interface MonthlyReturnsReportInput {
+  readonly filters: MonthlyRangeFilters;
+}
+
+/**
+ * Devoluciones por mes: cuantas unidades volvieron, cuanto valian y cuanto se
+ * le reintegro al cliente. Leido junto al reporte de ventas da la tasa de
+ * devolucion del periodo.
+ *
+ * El mes es el de la DEVOLUCION, no el de la venta: es el periodo en que el
+ * hecho afecta al inventario y a la caja.
+ */
+export class GetMonthlyReturnsReportUseCase
+  implements UseCase<MonthlyReturnsReportInput, MonthlyReturnsReportRow[]>
+{
+  constructor(private readonly reports: ReportRepository) {}
+
+  async execute(
+    input: MonthlyReturnsReportInput,
+  ): Promise<Result<MonthlyReturnsReportRow[], DomainError>> {
+    return ok(await this.reports.monthlyReturns(input.filters));
   }
 }

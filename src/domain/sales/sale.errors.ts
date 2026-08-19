@@ -7,6 +7,18 @@ export class SaleNotFoundError extends NotFoundError {
   }
 }
 
+export class SaleItemNotFoundError extends NotFoundError {
+  constructor(identifier?: string) {
+    super('Linea de venta', identifier);
+  }
+}
+
+export class RefundNotFoundError extends NotFoundError {
+  constructor(identifier?: string) {
+    super('Reembolso', identifier);
+  }
+}
+
 export class SalePaymentNotFoundError extends NotFoundError {
   constructor(identifier?: string) {
     super('Pago de venta', identifier);
@@ -98,6 +110,114 @@ export class PaymentCurrencyMismatchError extends BusinessRuleError {
   constructor(saleCurrencyCode: string) {
     super(
       `El pago debe registrarse en la moneda de la venta (${saleCurrencyCode})`,
+      { expectedCurrency: saleCurrencyCode },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lineas de venta (varios vehiculos por documento)
+// ---------------------------------------------------------------------------
+
+/** Una venta sin vehiculos no es una venta. */
+export class EmptySaleError extends BusinessRuleError {
+  constructor() {
+    super('La venta debe incluir al menos un vehiculo', { field: 'items' });
+  }
+}
+
+/**
+ * El mismo vehiculo dos veces en el mismo documento. La base tambien lo
+ * rechazaria (indice unico parcial `uq_sale_items_vehicle_active`), pero como
+ * un 500 sin explicacion: mejor detectarlo al validar la peticion.
+ */
+export class DuplicateVehicleInSaleError extends BusinessRuleError {
+  constructor(vehicleId: string) {
+    super('Un mismo vehiculo no puede aparecer dos veces en la misma venta', {
+      field: 'items',
+      vehicleId,
+    });
+  }
+}
+
+export class SaleItemDoesNotBelongToSaleError extends BusinessRuleError {
+  constructor(saleItemId: string, saleId: string) {
+    super('La linea indicada no pertenece a esta venta', { saleItemId, saleId });
+  }
+}
+
+export class SaleItemAlreadyReturnedError extends ConflictError {
+  constructor(saleItemId: string) {
+    super('El vehiculo de esta linea ya fue devuelto', { saleItemId });
+  }
+}
+
+export class SaleDoesNotAcceptReturnsError extends BusinessRuleError {
+  constructor(status: SaleStatus) {
+    super(
+      'Una venta cancelada ya devolvio todos sus vehiculos: no admite devoluciones por linea',
+      { status },
+    );
+  }
+}
+
+/**
+ * La ultima linea vigente no se puede QUITAR, solo devolver.
+ *
+ * Quitarla dejaria una venta sin vehiculos, que no significa nada: si la
+ * operacion entera se cae, lo que corresponde es cancelar la venta.
+ */
+export class LastSaleItemError extends BusinessRuleError {
+  constructor(saleId: string) {
+    super(
+      'No se puede quitar el ultimo vehiculo de la venta: cancele la venta completa',
+      { saleId },
+    );
+  }
+}
+
+/**
+ * Bloqueo fiscal de la devolucion.
+ *
+ * Con una factura EMITIDA, el importe de la unidad ya existe ante la DGII. Sacar
+ * la linea del total sin acreditarla dejaria la venta y el comprobante diciendo
+ * cosas distintas del mismo dinero. Primero la nota de credito por el importe de
+ * la linea, despues la devolucion.
+ */
+export class SaleItemNotCreditedError extends BusinessRuleError {
+  constructor(saleItemId: string, itemAmount: number, creditedAmount: number) {
+    super(
+      `El vehiculo esta facturado: emita primero una nota de credito por su importe (${itemAmount.toFixed(2)}; acreditado hasta ahora ${creditedAmount.toFixed(2)})`,
+      { saleItemId, itemAmount, creditedAmount },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reembolsos
+// ---------------------------------------------------------------------------
+
+/**
+ * No se puede devolver mas de lo que se cobro.
+ *
+ * El limite es lo cobrado menos lo ya reembolsado, no el precio de la venta:
+ * devolver dinero que el cliente nunca entrego no es un reembolso, es una
+ * salida de caja sin origen.
+ */
+export class RefundExceedsPaidError extends BusinessRuleError {
+  constructor(amount: number, available: number) {
+    super(
+      `El reembolso de ${amount.toFixed(2)} supera lo cobrado disponible para devolver (${available.toFixed(2)})`,
+      { amount, available },
+    );
+  }
+}
+
+/** Misma razon que en los cobros: sumar monedas distintas da un saldo falso. */
+export class RefundCurrencyMismatchError extends BusinessRuleError {
+  constructor(saleCurrencyCode: string) {
+    super(
+      `El reembolso debe registrarse en la moneda de la venta (${saleCurrencyCode})`,
       { expectedCurrency: saleCurrencyCode },
     );
   }

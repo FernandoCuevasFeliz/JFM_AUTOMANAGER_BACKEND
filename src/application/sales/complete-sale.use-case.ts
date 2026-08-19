@@ -1,4 +1,9 @@
-import { canTransitionSaleTo, isFullyPaid, type SaleWithDetails } from '../../domain/sales/sale.entity';
+import {
+  canTransitionSaleTo,
+  isFullyPaid,
+  netPaid,
+  type SaleWithDetails,
+} from '../../domain/sales/sale.entity';
 import {
   InvalidSaleStatusTransitionError,
   SaleNotFoundError,
@@ -33,7 +38,13 @@ export class CompleteSaleUseCase implements UseCase<CompleteSaleInput, SaleWithD
       return err(new InvalidSaleStatusTransitionError(sale.status, 'completed'));
     }
 
-    const paid = await this.sales.totalPaid(input.saleId);
+    // Neto: un reembolso ya emitido deshace un cobro, y con el la venta vuelve a
+    // tener saldo. Midiendo contra el bruto se podria entregar una unidad cuyo
+    // dinero ya se devolvio.
+    const paid = netPaid(
+      await this.sales.totalPaid(input.saleId),
+      await this.sales.totalRefunded(input.saleId),
+    );
     if (!isFullyPaid(sale.salePrice, paid)) {
       return err(new SaleNotFullyPaidError(sale.salePrice, paid));
     }

@@ -266,11 +266,16 @@ export class KyselyExpenseRepository implements ExpenseRepository {
       .orderBy('currencies.code', 'asc')
       .execute();
 
+    // El precio de venta vive en la LINEA desde la migracion 008. Se busca la
+    // linea vigente del vehiculo, no la venta: una venta puede llevar varias
+    // unidades y aqui interesa solo lo que se cobro por esta.
     const sale = await this.db
-      .selectFrom('sales')
+      .selectFrom('sale_items')
+      .innerJoin('sales', 'sales.id', 'sale_items.sale_id')
       .innerJoin('currencies', 'currencies.id', 'sales.currency_id')
-      .select(['sales.sale_price', 'sales.exchange_rate', 'currencies.code as currency_code'])
-      .where('sales.vehicle_id', '=', vehicleId)
+      .select(['sale_items.sale_price', 'sales.exchange_rate', 'currencies.code as currency_code'])
+      .where('sale_items.vehicle_id', '=', vehicleId)
+      .where('sale_items.status', '=', 'active')
       .where('sales.status', '!=', 'cancelled')
       .where('sales.deleted_at', 'is', null)
       .executeTakeFirst();

@@ -82,11 +82,23 @@ export function isExpired(quotation: Quotation, today: string): boolean {
 /**
  * Solo una cotizacion vigente y aceptada por el cliente puede dar lugar a una
  * reserva o una venta.
+ *
+ * Exige `approved`, no `pending`. Antes aceptaba las dos y eso contradecia a la
+ * propia maquina de estados: `QUOTATION_STATUS_TRANSITIONS.pending` no incluye
+ * `converted`, y el diagrama de arriba dice literalmente
+ * `pending --> approved --> converted`. Como `create-reservation` y
+ * `create-sale` fijan `converted` sin pasar por `canTransitionQuotationTo`, una
+ * cotizacion pendiente podia saltar por API a un estado que su propio ciclo
+ * prohibe, saltandose la aprobacion del cliente.
+ *
+ * De las tres fuentes que describian la regla —la tabla de transiciones, el
+ * diagrama y la interfaz, que solo ofrece convertir las aprobadas— esta funcion
+ * era la unica que discrepaba.
  */
 export function isConvertible(quotation: Quotation, today: string): boolean {
   return (
     quotation.deletedAt === null &&
-    (quotation.status === 'approved' || quotation.status === 'pending') &&
+    quotation.status === 'approved' &&
     !isExpired(quotation, today)
   );
 }

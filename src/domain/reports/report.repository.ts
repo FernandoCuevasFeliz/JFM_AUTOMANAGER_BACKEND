@@ -8,6 +8,7 @@ import type {
   FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
+  MonthlyReturnsReportRow,
   MonthlySalesReportRow,
   SalespersonReportRow,
   VehicleProfitability,
@@ -97,6 +98,8 @@ export interface ReportRepository {
    */
   monthlySales(filters: MonthlyRangeFilters): Promise<MonthlySalesReportRow[]>;
   salesBySalesperson(filters: SalespersonReportFilters): Promise<SalespersonReportRow[]>;
+  /** Devoluciones parciales por mes; el mes es el de la devolucion, no el de la venta. */
+  monthlyReturns(filters: MonthlyRangeFilters): Promise<MonthlyReturnsReportRow[]>;
   monthlyExpenses(filters: MonthlyExpensesFilters): Promise<MonthlyExpensesReportRow[]>;
   fiscalDocuments(filters: FiscalDocumentsFilters): Promise<FiscalDocumentsReportRow[]>;
 

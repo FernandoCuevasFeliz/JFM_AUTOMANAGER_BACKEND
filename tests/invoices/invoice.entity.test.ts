@@ -38,6 +38,7 @@ function makeNote(amount: number, status: FiscalDocStatus): CreditNote {
   return {
     id: `cn-${amount}-${status}`,
     invoiceId: 'inv-1',
+    saleItemId: null,
     ncfNumber: status === 'issued' ? 'E340000000001' : null,
     reason: 'Devolucion parcial',
     amount,

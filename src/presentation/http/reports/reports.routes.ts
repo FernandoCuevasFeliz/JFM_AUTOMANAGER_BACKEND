@@ -59,6 +59,13 @@ export function buildReportsRoutes(controller: ReportsController): Router {
   );
 
   router.get(
+    '/returns-monthly',
+    requirePermission('reports:read'),
+    validate({ query: monthlySalesQuerySchema }),
+    asyncHandler(controller.monthlyReturns),
+  );
+
+  router.get(
     '/expenses-monthly',
     requirePermission('reports:read'),
     validate({ query: monthlyExpensesQuerySchema }),

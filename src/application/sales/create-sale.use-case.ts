@@ -20,6 +20,8 @@ import {
 } from '../../domain/reservations/reservation.errors';
 import type { SaleWithDetails } from '../../domain/sales/sale.entity';
 import {
+  DuplicateVehicleInSaleError,
+  EmptySaleError,
   PaymentExceedsBalanceError,
   SaleNotFoundError,
   SalePriceBelowDepositError,
@@ -47,13 +49,18 @@ export interface InitialPaymentInput {
   readonly referenceNumber: string | null;
 }
 
+/** Un vehiculo de la venta con el precio pactado para esa unidad. */
+export interface SaleItemInput {
+  readonly vehicleId: string;
+  readonly salePrice: number;
+}
+
 export interface CreateSaleInput extends ActorInput {
   readonly reservationId: string | null;
   readonly quotationId: string | null;
   readonly clientId: string;
-  readonly vehicleId: string;
+  readonly items: readonly SaleItemInput[];
   readonly currencyId: string;
-  readonly salePrice: number;
   readonly exchangeRate: number;
   readonly saleDate: string;
   readonly salespersonId: string;
@@ -63,21 +70,25 @@ export interface CreateSaleInput extends ActorInput {
 /**
  * Cierre del ciclo comercial: la venta.
  *
+ * Una venta puede llevar VARIOS vehiculos (flotilla, mayoreo): la cabecera dice
+ * quien compra, cuando y en que moneda, y cada linea que unidad y a que precio.
+ * El importe de la venta es la suma de las lineas, no una columna.
+ *
  * Es la operacion mas delicada del sistema y ocurre integramente dentro de una
  * transaccion:
  *
- *  1. Se verifica que el vehiculo sigue disponible (`in_inventory` o
- *     `reserved`) y que no tiene ya una venta vigente (indice unico parcial
- *     `uq_sales_vehicle_active`; las canceladas no cuentan).
- *  2. Se crea la venta en estado `in_process`.
- *  3. El vehiculo pasa a `sold`.
+ *  1. Se verifica CADA vehiculo: que sigue disponible (`in_inventory` o
+ *     `reserved`) y que no esta ya en una linea vigente de otra venta (indice
+ *     unico parcial `uq_sale_items_vehicle_active`; las canceladas no cuentan).
+ *  2. Se crea la cabecera en estado `in_process` y sus lineas.
+ *  3. Cada vehiculo pasa a `sold`.
  *  4. La reserva de origen, si existe, queda `converted`; lo mismo la
  *     cotizacion.
  *  5. Si se informo un pago inicial, se registra como primer `sale_payment`.
  *
  * Si cualquier paso falla se revierte todo: nunca queda un vehiculo marcado
  * como vendido sin venta, ni una venta sobre un vehiculo que en realidad sigue
- * en inventario.
+ * en inventario, ni una venta a medio armar con tres de sus cinco unidades.
  *
  * Las validaciones de disponibilidad se repiten DENTRO de la transaccion (no
  * solo antes de abrirla) para que dos vendedores que registren la misma unidad
@@ -93,6 +104,15 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
   ) {}
 
   async execute(input: CreateSaleInput): Promise<Result<SaleWithDetails, DomainError>> {
+    if (input.items.length === 0) {
+      return err(new EmptySaleError());
+    }
+
+    const duplicated = firstDuplicateVehicle(input.items);
+    if (duplicated !== null) {
+      return err(new DuplicateVehicleInSaleError(duplicated));
+    }
+
     const client = await this.clients.findById(input.clientId);
     if (client === null) {
       return err(new ClientNotFoundError(input.clientId));
@@ -109,30 +129,37 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
       return err(new InconsistentExchangeRateError(currency.code, input.exchangeRate));
     }
 
+    // El importe de la venta es la suma de sus lineas.
+    const total = round2(input.items.reduce((sum, item) => sum + item.salePrice, 0));
+
     if (input.initialPayment !== null) {
       if (
         (await this.catalog.findPaymentMethodById(input.initialPayment.paymentMethodId)) === null
       ) {
         return err(new PaymentMethodNotFoundError(input.initialPayment.paymentMethodId));
       }
-      if (input.initialPayment.amount > input.salePrice) {
-        return err(new PaymentExceedsBalanceError(input.initialPayment.amount, input.salePrice));
+      if (input.initialPayment.amount > total) {
+        return err(new PaymentExceedsBalanceError(input.initialPayment.amount, total));
       }
     }
 
     const today = this.clock.today();
 
     const result = await this.unitOfWork.run<string, DomainError>(async (trx) => {
-      const vehicle = await trx.vehicles.findById(input.vehicleId);
-      if (vehicle === null) {
-        return err(new VehicleNotFoundError(input.vehicleId));
+      for (const item of input.items) {
+        const vehicle = await trx.vehicles.findById(item.vehicleId);
+        if (vehicle === null) {
+          return err(new VehicleNotFoundError(item.vehicleId));
+        }
+        if (!isSellable(vehicle)) {
+          return err(new VehicleNotSellableError(item.vehicleId, vehicle.status));
+        }
+        if (await trx.sales.isVehicleSold(item.vehicleId)) {
+          return err(new VehicleAlreadySoldError(item.vehicleId));
+        }
       }
-      if (!isSellable(vehicle)) {
-        return err(new VehicleNotSellableError(input.vehicleId, vehicle.status));
-      }
-      if (await trx.sales.isVehicleSold(input.vehicleId)) {
-        return err(new VehicleAlreadySoldError(input.vehicleId));
-      }
+
+      const vehicleIds = new Set(input.items.map((item) => item.vehicleId));
 
       if (input.reservationId !== null) {
         const reservation = await trx.reservations.findById(input.reservationId);
@@ -142,7 +169,10 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
         if (reservation.clientId !== input.clientId) {
           return err(new ReservationClientMismatchError());
         }
-        if (reservation.vehicleId !== input.vehicleId) {
+        // La reserva es de un vehiculo; basta con que ese vehiculo este en la
+        // venta. Lo normal es que la venta agregue mas unidades alrededor de la
+        // reservada, y eso es legitimo.
+        if (!vehicleIds.has(reservation.vehicleId)) {
           return err(new ReservationVehicleMismatchError());
         }
         if (!isReservationConvertible(reservation, today)) {
@@ -152,16 +182,14 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
          * Los dos importes, en la misma moneda antes de compararlos.
          *
          * `deposit_amount` se guarda sin moneda —esta en la de reporte por
-         * convencion— mientras que `salePrice` viene en la divisa de la venta.
+         * convencion— mientras que el total viene en la divisa de la venta.
          * Comparandolos en crudo, una venta de 30.000 dolares contra un
          * deposito de 150.000 pesos se rechazaba estando bien; y al reves, una
          * venta en una divisa debil pasaba un control que deberia frenarla.
          */
-        const salePriceConverted = toReportingCurrency(input.salePrice, input.exchangeRate);
-        if (salePriceConverted < reservation.depositAmount) {
-          return err(
-            new SalePriceBelowDepositError(salePriceConverted, reservation.depositAmount),
-          );
+        const totalConverted = toReportingCurrency(total, input.exchangeRate);
+        if (totalConverted < reservation.depositAmount) {
+          return err(new SalePriceBelowDepositError(totalConverted, reservation.depositAmount));
         }
       }
 
@@ -173,7 +201,7 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
         if (quotation.clientId !== input.clientId) {
           return err(new ReservationClientMismatchError());
         }
-        if (quotation.vehicleId !== input.vehicleId) {
+        if (!vehicleIds.has(quotation.vehicleId)) {
           return err(new ReservationVehicleMismatchError());
         }
         // Una cotizacion ya convertida en la reserva que origina esta venta es
@@ -191,16 +219,20 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
         reservationId: input.reservationId,
         quotationId: input.quotationId,
         clientId: input.clientId,
-        vehicleId: input.vehicleId,
         currencyId: input.currencyId,
-        salePrice: input.salePrice,
         exchangeRate: input.exchangeRate,
         saleDate: input.saleDate,
         status: 'in_process',
         salespersonId: input.salespersonId,
       });
 
-      await trx.vehicles.updateStatus(input.vehicleId, 'sold');
+      for (const item of input.items) {
+        await trx.sales.addItem(sale.id, {
+          vehicleId: item.vehicleId,
+          salePrice: item.salePrice,
+        });
+        await trx.vehicles.updateStatus(item.vehicleId, 'sold');
+      }
 
       if (input.reservationId !== null) {
         await trx.reservations.updateStatus(input.reservationId, 'converted');
@@ -239,4 +271,19 @@ export class CreateSaleUseCase implements UseCase<CreateSaleInput, SaleWithDetai
 
     return ok(created);
   }
+}
+
+function firstDuplicateVehicle(items: readonly SaleItemInput[]): string | null {
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.vehicleId)) {
+      return item.vehicleId;
+    }
+    seen.add(item.vehicleId);
+  }
+  return null;
+}
+
+function round2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }

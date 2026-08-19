@@ -419,7 +419,50 @@ async function main() {
   });
   await call('POST', `/sales/${venta3.id}/cancel`, undefined, { expect: 200 });
   created.ventas.push({ num: venta3.saleNumber, estado: 'cancelada (vehículo de vuelta en inventario)' });
-  log('Ventas', '3 (1 completada, 1 en proceso, 1 cancelada) con 3 pagos');
+
+  // Venta 4: FLOTILLA. Tres vehículos en un solo documento, con una devolución
+  // parcial y su reembolso. Es el caso que el modelo de un vehículo por venta
+  // no podía representar: antes había que abrir tres ventas y cancelar una
+  // entera para devolver una unidad.
+  const flotilla = await post('/sales', {
+    reservationId: null, quotationId: null,
+    clientId: clientes[5].id, currencyId: DOP,
+    exchangeRate: 1, saleDate: dia(-12), salespersonId: admin.id,
+    // veh[11] es el que acaba de liberar la venta cancelada: se revende sin
+    // borrar el documento anulado, que es lo que permite el índice único parcial.
+    items: [
+      { vehicleId: veh[6].id, salePrice: 2_380_000 },
+      { vehicleId: veh[3].id, salePrice: 1_690_000 },
+      { vehicleId: veh[11].id, salePrice: 1_920_000 },
+    ],
+    initialPayment: {
+      paymentMethodId: pago.Transferencia, amount: 3_000_000,
+      paymentDate: dia(-12), referenceNumber: 'TRF-FLOTA-9001',
+    },
+  });
+
+  // El cliente devuelve una de las tres unidades: la venta sigue viva con las
+  // otras dos y su importe baja solo porque la línea deja de sumar.
+  const lineaDevuelta = flotilla.items.find((i) => i.vehicleId === veh[3].id);
+  await call('POST', `/sales/${flotilla.id}/items/${lineaDevuelta.id}/return`, {
+    reason: 'El cliente redujo la flotilla a dos unidades',
+    destination: 'in_inventory',
+  }, { expect: 200 });
+
+  // Y se le reintegra la parte proporcional de lo que había pagado.
+  await post(`/sales/${flotilla.id}/refunds`, {
+    saleItemId: lineaDevuelta.id,
+    refundMethodId: pago.Transferencia, currencyId: DOP,
+    amount: 800_000, exchangeRate: 1,
+    refundDate: dia(-9),
+    reason: 'Reintegro por la unidad devuelta',
+  });
+  created.ventas.push({
+    num: flotilla.saleNumber,
+    estado: '3 vehículos, 1 devuelto y reembolsado',
+  });
+
+  log('Ventas', '4 (1 completada, 1 en proceso, 1 cancelada, 1 flotilla con devolución) con 4 pagos y 1 reembolso');
 
   // --- Facturacion electronica (e-CF) --------------------------------------
   // El backend puede no tener aun el modulo desplegado; en ese caso se omite

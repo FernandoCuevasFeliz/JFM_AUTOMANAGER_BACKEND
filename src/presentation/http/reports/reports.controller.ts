@@ -4,6 +4,7 @@ import type { GetFiscalDocumentsReportUseCase } from '../../../application/repor
 import type { GetInventoryStatusReportUseCase } from '../../../application/reports/get-inventory-status-report.use-case';
 import type { GetMonthlyExpensesReportUseCase } from '../../../application/reports/get-monthly-expenses-report.use-case';
 import type {
+  GetMonthlyReturnsReportUseCase,
   GetMonthlySalesReportUseCase,
   GetSalesBySalespersonReportUseCase,
 } from '../../../application/reports/get-sales-reports.use-case';
@@ -25,6 +26,7 @@ export interface ReportsControllerDeps {
   readonly accountsReceivable: UseCaseOf<GetAccountsReceivableUseCase>;
   readonly monthlySales: UseCaseOf<GetMonthlySalesReportUseCase>;
   readonly salesBySalesperson: UseCaseOf<GetSalesBySalespersonReportUseCase>;
+  readonly monthlyReturns: UseCaseOf<GetMonthlyReturnsReportUseCase>;
   readonly monthlyExpenses: UseCaseOf<GetMonthlyExpensesReportUseCase>;
   readonly inventoryStatus: UseCaseOf<GetInventoryStatusReportUseCase>;
   readonly fiscalDocuments: UseCaseOf<GetFiscalDocumentsReportUseCase>;
@@ -99,6 +101,18 @@ export class ReportsController {
         dateTo: query.dateTo,
         currencyCode: query.currency,
         salespersonId: query.salespersonId,
+      }),
+    });
+    sendResult(res, next, result);
+  };
+
+  monthlyReturns = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const query = req.query as unknown as MonthlySalesQuery;
+    const result = await this.deps.monthlyReturns.execute({
+      filters: compact({
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+        currencyCode: query.currency,
       }),
     });
     sendResult(res, next, result);

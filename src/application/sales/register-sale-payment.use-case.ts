@@ -1,6 +1,11 @@
 import type { CatalogRepository } from '../../domain/catalogs/catalog.entity';
 import { CurrencyNotFoundError, PaymentMethodNotFoundError } from '../../domain/catalogs/catalog.errors';
-import { acceptsPayments, pendingBalance, type SalePayment } from '../../domain/sales/sale.entity';
+import {
+  acceptsPayments,
+  netPaid,
+  pendingBalance,
+  type SalePayment,
+} from '../../domain/sales/sale.entity';
 import {
   PaymentCurrencyMismatchError,
   PaymentExceedsBalanceError,
@@ -77,7 +82,10 @@ export class RegisterSalePaymentUseCase
         return err(new PaymentCurrencyMismatchError(saleCurrency?.code ?? sale.currencyId));
       }
 
-      const alreadyPaid = await trx.sales.totalPaid(input.saleId);
+      // Neto de reembolsos: si se le devolvio dinero al cliente, ese importe
+      // vuelve a estar pendiente y se puede volver a cobrar.
+      const alreadyRefunded = await trx.sales.totalRefunded(input.saleId);
+      const alreadyPaid = netPaid(await trx.sales.totalPaid(input.saleId), alreadyRefunded);
       const balance = pendingBalance(sale.salePrice, alreadyPaid);
 
       if (input.amount > balance + 0.01) {
@@ -94,7 +102,7 @@ export class RegisterSalePaymentUseCase
         receivedBy: input.actorUserId,
       });
 
-      const totalPaid = await trx.sales.totalPaid(input.saleId);
+      const totalPaid = netPaid(await trx.sales.totalPaid(input.saleId), alreadyRefunded);
       const remaining = pendingBalance(sale.salePrice, totalPaid);
 
       return ok({

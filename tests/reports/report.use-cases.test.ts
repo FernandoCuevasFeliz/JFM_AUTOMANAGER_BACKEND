@@ -13,6 +13,7 @@ import type {
   FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
+  MonthlyReturnsReportRow,
   MonthlySalesReportRow,
   SalespersonReportRow,
   VehicleProfitability,
@@ -40,6 +41,7 @@ class RecordingReportRepository implements ReportRepository {
       receivable?: AccountReceivable[];
       monthlySales?: MonthlySalesReportRow[];
       bySalesperson?: SalespersonReportRow[];
+      returns?: MonthlyReturnsReportRow[];
       expenses?: MonthlyExpensesReportRow[];
       fiscal?: FiscalDocumentsReportRow[];
       inventory?: InventoryStatusRow[];
@@ -50,6 +52,11 @@ class RecordingReportRepository implements ReportRepository {
     this.lastFilters = filters;
     this.lastPage = page;
     return buildPaginatedResult(this.rows.profitability ?? [], 1, page);
+  }
+
+  async monthlyReturns(filters: unknown) {
+    this.lastFilters = filters;
+    return this.rows.returns ?? [];
   }
 
   async accountsReceivable(filters: unknown, page: PageQuery) {
@@ -134,6 +141,7 @@ describe('Reportes agregados', () => {
       month: '2026-07-01',
       currencyCode: 'DOP',
       salesCount: 2,
+      vehiclesCount: 3,
       totalAmount: 3_900_000,
       totalAmountConverted: 3_900_000,
     };

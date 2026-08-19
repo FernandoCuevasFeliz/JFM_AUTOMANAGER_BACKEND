@@ -1,16 +1,24 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../../middlewares/async-handler';
 import { requirePermission } from '../../middlewares/rbac.middleware';
 import { validate } from '../../middlewares/validate.middleware';
-import { uuidParam } from '../shared/common.schemas';
+import { uuid, uuidParam } from '../shared/common.schemas';
 import type { SalesController } from './sales.controller';
 import {
+  addSaleItemSchema,
   createSaleSchema,
   listSalesQuerySchema,
   registerPaymentSchema,
+  registerRefundSchema,
+  returnSaleItemSchema,
   salesSummaryQuerySchema,
+  updateSaleItemSchema,
   updateSaleSchema,
 } from './sales.schemas';
+
+/** Rutas anidadas: la venta y una de sus lineas. */
+const saleItemParams = z.object({ id: uuid, itemId: uuid });
 
 export function buildSalesRoutes(controller: SalesController): Router {
   const router = Router();
@@ -72,7 +80,48 @@ export function buildSalesRoutes(controller: SalesController): Router {
     asyncHandler(controller.remove),
   );
 
-  // --- Pagos de la venta ---------------------------------------------------
+  // --- Vehiculos de la venta ------------------------------------------------
+  //
+  // Agregar, corregir y quitar son ediciones del documento: `sales:write`.
+  // La DEVOLUCION tambien, porque mueve inventario y altera el importe vigente;
+  // no se abre a `payments:write` para que registrar un cobro no habilite de
+  // paso a sacar un vehiculo de una venta.
+
+  router.post(
+    '/:id/items',
+    requirePermission('sales:write'),
+    validate({ params: uuidParam(), body: addSaleItemSchema }),
+    asyncHandler(controller.addItem),
+  );
+
+  router.patch(
+    '/:id/items/:itemId',
+    requirePermission('sales:write'),
+    validate({ params: saleItemParams, body: updateSaleItemSchema }),
+    asyncHandler(controller.updateItem),
+  );
+
+  /** Quita una linea agregada por error; solo con la venta en proceso. */
+  router.delete(
+    '/:id/items/:itemId',
+    requirePermission('sales:write'),
+    validate({ params: saleItemParams }),
+    asyncHandler(controller.removeItem),
+  );
+
+  /** Devuelve el vehiculo: la linea queda `returned` y la venta sigue viva. */
+  router.post(
+    '/:id/items/:itemId/return',
+    requirePermission('sales:write'),
+    validate({ params: saleItemParams, body: returnSaleItemSchema }),
+    asyncHandler(controller.returnItem),
+  );
+
+  // --- Cobros y reembolsos --------------------------------------------------
+  //
+  // El estado de cuenta incluye ambos, asi que `GET /payments` los devuelve
+  // juntos: separarlos obligaria al frontend a cruzar dos listas para saber
+  // cuanto debe el cliente.
 
   router.get(
     '/:id/payments',
@@ -86,6 +135,14 @@ export function buildSalesRoutes(controller: SalesController): Router {
     requirePermission('payments:write'),
     validate({ params: uuidParam(), body: registerPaymentSchema }),
     asyncHandler(controller.registerPayment),
+  );
+
+  /** Devolucion de dinero. Mismo permiso que cobrar: es la misma caja. */
+  router.post(
+    '/:id/refunds',
+    requirePermission('payments:write'),
+    validate({ params: uuidParam(), body: registerRefundSchema }),
+    asyncHandler(controller.registerRefund),
   );
 
   return router;

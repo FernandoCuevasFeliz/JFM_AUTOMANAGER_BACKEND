@@ -761,7 +761,12 @@ Las reservas **no se borran**; se cancelan.
 
 `POST /reservations/expire-overdue` → `{ "data": { "expired": 2, "releasedVehicles": 2 } }`.
 
-### 5.11 Ventas y pagos
+### 5.11 Ventas, vehículos, cobros y reembolsos
+
+**Una venta puede llevar varios vehículos.** La venta es la cabecera —quién compra, cuándo, en qué
+moneda— y cada vehículo es una *línea* (`items`) con su propio precio. El importe de la venta **no es
+un campo propio**: es la suma de las líneas vigentes. Por eso devolver un vehículo no reescribe nada,
+solo saca esa línea del total.
 
 | Método | Ruta | Permiso |
 |---|---|---|
@@ -773,20 +778,29 @@ Las reservas **no se borran**; se cancelan.
 | `POST` | `/sales/:id/complete` | `sales:write` |
 | `POST` | `/sales/:id/cancel` | `sales:write` |
 | `DELETE` | `/sales/:id` | `sales:delete` |
+| `POST` | `/sales/:id/items` | `sales:write` |
+| `PATCH` | `/sales/:id/items/:itemId` | `sales:write` |
+| `DELETE` | `/sales/:id/items/:itemId` | `sales:write` |
+| `POST` | `/sales/:id/items/:itemId/return` | `sales:write` |
 | `GET` | `/sales/:id/payments` | `payments:read` |
 | `POST` | `/sales/:id/payments` | `payments:write` |
+| `POST` | `/sales/:id/refunds` | `payments:write` |
 
-Filtros del listado: `search`, `clientId`, `vehicleId`, `salespersonId`, `status`, `dateFrom`, `dateTo`.
-El de `summary` acepta `clientId`, `salespersonId`, `status`, `dateFrom`, `dateTo` (sin `search` ni
-`vehicleId`).
+Filtros del listado: `search`, `clientId`, `vehicleId`, `salespersonId`, `status`, `dateFrom`,
+`dateTo`. `search` busca también por chasis de cualquiera de los vehículos de la venta, y
+`vehicleId` encuentra la venta que contiene ese vehículo. El de `summary` acepta `clientId`,
+`salespersonId`, `status`, `dateFrom`, `dateTo` (sin `search` ni `vehicleId`).
 
 ```jsonc
 // POST /sales — número automático (VEN-2026-000001)
 {
   "reservationId": "…",   // o null
   "quotationId": "…",     // o null
-  "clientId": "…", "vehicleId": "…", "currencyId": "…",
-  "salePrice": 1800000,
+  "clientId": "…", "currencyId": "…",
+  "items": [              // uno o varios vehículos, hasta 50
+    { "vehicleId": "…", "salePrice": 1800000 },
+    { "vehicleId": "…", "salePrice": 1200000 }
+  ],
   "exchangeRate": 1,
   "saleDate": "2026-03-05",
   "salespersonId": "…",
@@ -797,26 +811,77 @@ El de `summary` acepta `clientId`, `salespersonId`, `status`, `dateFrom`, `dateT
 }
 ```
 
-La venta nace en estado `in_process`. En la misma transacción el vehículo pasa a `sold` y la reserva
-y la cotización quedan `converted`.
+> **Forma antigua aceptada.** Enviar `vehicleId` + `salePrice` en lugar de `items` sigue funcionando:
+> el backend lo traduce a una línea única. Es una traducción sin ambigüedad, pensada para no romper
+> lo que ya llama a este endpoint. Enviar las dos formas a la vez da `422`.
+
+La venta nace en estado `in_process`. En la misma transacción **cada** vehículo pasa a `sold` y la
+reserva y la cotización quedan `converted`. Si la venta viene de una reserva, basta con que el
+vehículo reservado esté entre los `items`: la venta puede añadir más unidades alrededor.
 
 ```jsonc
-// GET /sales/:id — incluye el estado de cuenta completo
+// GET /sales/:id — incluye las líneas y el estado de cuenta completo
 { "data": {
   "id": "…", "saleNumber": "VEN-2026-000001", "status": "in_process",
   "clientName": "Hidekel Reyes",
-  "vehicleChassisNumber": "JT2…", "vehicleBrandName": "Toyota",
-  "vehicleModelName": "Corolla Cross", "vehicleYear": 2024,
-  "currencyCode": "DOP", "salePrice": 1800000, "exchangeRate": 1, "saleDate": "2026-03-05",
+  "currencyCode": "DOP", "exchangeRate": 1, "saleDate": "2026-03-05",
+  "salePrice": 3000000,          // derivado: suma de las líneas `active`
   "salespersonName": "Ana Vendedora",
   "reservationNumber": "RES-2026-000001", "quotationNumber": "COT-2026-000001",
+  "items": [
+    { "id": "…", "vehicleId": "…", "salePrice": 1800000, "status": "active",
+      "returnedAt": null, "returnReason": null,
+      "vehicleChassisNumber": "JT2…", "vehicleBrandName": "Toyota",
+      "vehicleModelName": "Corolla Cross", "vehicleYear": 2024 },
+    { "id": "…", "vehicleId": "…", "salePrice": 1200000, "status": "returned",
+      "returnedAt": "2026-04-02T15:00:00.000Z",
+      "returnReason": "El cliente redujo la flotilla", … }
+  ],
   "payments": [{ "id": "…", "amount": 100000, "paymentDate": "2026-03-01",
                  "paymentMethodName": "Efectivo", "currencyCode": "DOP",
                  "referenceNumber": "Deposito reserva", "receivedByName": "Ana Vendedora", … }],
-  "totalPaid": 100000,
-  "pendingBalance": 1700000
+  "refunds": [{ "id": "…", "saleItemId": "…", "amount": 300000, "refundDate": "2026-04-02",
+                "refundMethodName": "Transferencia", "currencyCode": "DOP",
+                "reason": "Reintegro por la unidad devuelta",
+                "processedByName": "Ana Vendedora", "vehicleChassisNumber": "JT2…", … }],
+  "totalPaid": 1500000,          // bruto cobrado
+  "totalRefunded": 300000,
+  "netPaid": 1200000,            // cobrado − devuelto
+  "pendingBalance": 600000       // salePrice − netPaid
 } }
 ```
+
+> **`vehicleChassisNumber` y compañía ya no están en la raíz.** Ahora hay uno por línea, dentro de
+> `items`. Una venta de tres vehículos no tiene "un" chasis.
+
+#### Vehículos de la venta
+
+```jsonc
+// POST /sales/:id/items — añade un vehículo a una venta en proceso
+{ "vehicleId": "…", "salePrice": 1200000 }        // 201, devuelve la venta completa
+
+// PATCH /sales/:id/items/:itemId — corrige el precio pactado de una unidad
+{ "salePrice": 1150000 }
+
+// DELETE /sales/:id/items/:itemId — quita una línea añadida por error
+// POST /sales/:id/items/:itemId/return — devuelve el vehículo
+{ "reason": "El cliente devolvió la unidad",
+  "destination": "in_inventory" }                  // o "in_repair"; por omisión "in_inventory"
+```
+
+**Quitar y devolver no son lo mismo.** *Quitar* borra la línea porque nunca debió existir: solo con
+la venta `in_process`, y nunca la última que quede (para eso se cancela la venta entera). *Devolver*
+conserva la línea con su motivo y su fecha, admite una venta ya `completed` —es el caso del cliente
+que se arrepiente tras recibir el vehículo— y saca el importe del total vigente sin tocar el resto de
+la venta.
+
+En los dos casos el vehículo vuelve al inventario en la misma transacción y queda disponible para
+venderse otra vez.
+
+Ni quitar ni corregir el precio pueden dejar el total por debajo de lo ya cobrado: eso daría un saldo
+negativo y devuelve `422`.
+
+#### Cobros
 
 ```jsonc
 // POST /sales/:id/payments
@@ -830,21 +895,52 @@ y la cotización quedan `converted`.
 Usa `fullyPaid` para habilitar el botón de completar la venta. **Registrar el último pago no cierra
 la venta sola**: quedar saldada y entregar la unidad son dos momentos distintos del negocio.
 
-`GET /sales/:id/payments` devuelve el estado de cuenta suelto:
+#### Reembolsos
 
 ```jsonc
-{ "data": { "payments": [ … ], "salePrice": 1800000, "totalPaid": 1800000, "pendingBalance": 0 } }
+// POST /sales/:id/refunds
+{ "saleItemId": "…",        // o null: reembolso general de la venta, no atado a una unidad
+  "refundMethodId": "…", "currencyId": "…",
+  "amount": 300000,
+  "exchangeRate": 1,        // la del día en que sale el dinero, NO la de la venta
+  "refundDate": "2026-04-02",
+  "reason": "Reintegro por la unidad devuelta" }
+
+// 201
+{ "data": { "refund": { … }, "totalPaid": 1500000, "totalRefunded": 300000, "netPaid": 1200000 } }
+```
+
+Los reembolsos viven aparte de los cobros a propósito: `payments` responde "cuánto entró", no "cuánto
+neto". El límite es **lo cobrado menos lo ya reembolsado**, no el precio de la venta: no se devuelve
+dinero que el cliente nunca entregó (`422`). Como en los cobros, el reembolso va en la moneda de la
+venta.
+
+Devolver el vehículo y devolver el dinero son **dos operaciones distintas** y pueden no coincidir ni
+en el momento ni en el importe. El reembolso no exige que la unidad esté devuelta: puede ser un
+ajuste de precio pactado.
+
+#### Estado de cuenta
+
+`GET /sales/:id/payments` devuelve cobros y reembolsos juntos, que es lo que hace falta para saber
+cuánto debe el cliente:
+
+```jsonc
+{ "data": { "payments": [ … ], "refunds": [ … ], "salePrice": 3000000,
+            "totalPaid": 1500000, "totalRefunded": 300000,
+            "netPaid": 1200000, "pendingBalance": 1800000 } }
 ```
 
 `GET /sales/summary`:
 
 ```jsonc
-{ "data": { "reportingCurrency": "DOP", "totalSales": 12,
-            "totalAmount": 21500000, "totalCollected": 18300000, "pendingBalance": 3200000 } }
+{ "data": { "reportingCurrency": "DOP", "totalSales": 12, "totalVehicles": 15,
+            "totalAmount": 21500000, "totalCollected": 18300000,
+            "totalRefunded": 800000, "pendingBalance": 4000000 } }
 ```
 
-Los totales están consolidados en pesos con la tasa de cada venta, así que ventas en dólares y en
-pesos son sumables entre sí.
+`totalSales` cuenta documentos y `totalVehicles` unidades: desde que una venta puede llevar varias,
+son dos cifras distintas. Los totales están consolidados en pesos con la tasa de cada venta, así que
+ventas en dólares y en pesos son sumables entre sí.
 
 ### 5.12 Firma de subidas
 
@@ -925,22 +1021,33 @@ Filtros del listado: `search` (NCF, número de venta, cliente, documento), `stat
   "saleNumber": "VEN-2026-000001", "salePrice": 1800000, "currencyCode": "DOP",
   "saleDate": "2026-03-05", "saleStatus": "completed",
   "clientName": "Hidekel Reyes", "clientDocumentNumber": "402-1234567-8",
-  "vehicleChassisNumber": "JT2CC24A1R0100001", "createdByName": "Administrador General",
+  "vehicleChassisNumbers": ["JT2CC24A1R0100001", "KNASP24E5V0100005"],
+  "createdByName": "Administrador General",
   "creditNotes": [ … ],
   "creditedAmount": 300000,
   "netAmount": 1500000
 } }
 ```
 
-`creditedAmount` suma **solo las notas emitidas**; `netAmount` es lo que sigue vigente de la venta.
+`salePrice` es el importe **facturado**: la suma de *todas* las líneas de la venta, devueltas
+incluidas. No baja cuando se devuelve un vehículo — un e-CF emitido no cambia de importe; lo corrige
+la nota de crédito. `creditedAmount` suma **solo las notas emitidas** y `netAmount` es la resta de
+ambos, que es lo que sigue vigente ante la DGII. `vehicleChassisNumbers` lista todos los vehículos
+que la factura ampara.
 
 ```jsonc
 // POST /invoices/:id/credit-notes
-{ "reason": "Devolucion parcial del vehiculo", "amount": 300000 }
+{ "saleItemId": "…",   // opcional; el vehículo devuelto que la motiva
+  "reason": "Devolucion parcial del vehiculo", "amount": 300000 }
 
 // POST /invoices/:id/credit-notes/:creditNoteId/issue
 { "ncfNumber": "E340000000001", "dgiiTrackId": null, "xmlUrl": null }
 ```
+
+**`saleItemId` cambia el techo de la nota**: atada a una línea, no puede pasar del precio de *esa*
+unidad; sin ella, el techo es el importe vigente de la factura completa. Además es lo que habilita
+después la devolución del vehículo — ver [§5.11](#511-ventas-vehículos-cobros-y-reembolsos) y la
+regla de bloqueo fiscal en [§7](#facturación-qué-bloquea-qué).
 
 Ambos endpoints de notas devuelven **la factura completa actualizada**, no la nota: es lo que la
 pantalla necesita repintar.
@@ -964,6 +1071,7 @@ DGII usa un solo espacio de numeración.
 | `GET` | `/reports/accounts-receivable` | `reports:read` + `sales:read` | paginado |
 | `GET` | `/reports/sales-monthly` | `reports:read` | arreglo |
 | `GET` | `/reports/sales-by-salesperson` | `reports:read` | arreglo |
+| `GET` | `/reports/returns-monthly` | `reports:read` | arreglo |
 | `GET` | `/reports/expenses-monthly` | `reports:read` | arreglo |
 | `GET` | `/reports/inventory-status` | `reports:read` | arreglo |
 | `GET` | `/reports/fiscal-documents` | `reports:read` | arreglo |
@@ -1033,17 +1141,22 @@ Saldo pendiente por venta. Filtros: `search` (número de venta, cliente o chasis
   "saleId": "…", "saleNumber": "VEN-2026-000002", "saleDate": "2026-08-06",
   "saleStatus": "in_process",
   "clientId": "…", "clientName": "Transporte del Cibao SRL", "clientPhone": "809-555-1004",
-  "vehicleId": "…", "chassisNumber": "JT2RV23B2S0100002",
+  "activeItems": 2, "returnedItems": 1,
+  "chassisNumbers": ["JT2RV23B2S0100002", "KNASP24E5V0100005"],
   "salespersonId": "…", "salespersonName": "Administrador General",
   "currencyCode": "DOP", "exchangeRate": 1,
-  "salePrice": 2100000, "totalPaid": 700000,
-  "pendingBalance": 1400000, "pendingBalanceConverted": 1400000,
+  "salePrice": 2100000,          // suma de las líneas vigentes
+  "totalPaid": 700000, "totalRefunded": 100000,
+  "pendingBalance": 1500000,     // salePrice − (cobrado − reembolsado)
+  "pendingBalanceConverted": 1500000,
   "daysOutstanding": 8
 }], "meta": { … } }
 ```
 
-`daysOutstanding` son los días transcurridos desde la fecha de la venta — útil para pintar la
-antigüedad de la deuda.
+`salePrice` cuenta solo los vehículos que siguen vendidos, y los reembolsos **suman** al saldo:
+devolverle dinero al cliente deshace un cobro, así que ese importe vuelve a estar pendiente sobre lo
+que quede vendido. `chassisNumbers` trae los vehículos vigentes de la venta y `daysOutstanding` los
+días transcurridos desde la fecha de la venta — útil para pintar la antigüedad de la deuda.
 
 #### `GET /reports/sales-monthly` y `GET /reports/sales-by-salesperson`
 
@@ -1055,19 +1168,44 @@ que no cuenta como ingreso del período. Filtros: `dateFrom`, `dateTo`, `currenc
 ```jsonc
 // GET /reports/sales-monthly
 { "data": [
-  { "month": "2026-07-01", "currencyCode": "DOP", "salesCount": 2,
+  { "month": "2026-07-01", "currencyCode": "DOP", "salesCount": 2, "vehiclesCount": 3,
     "totalAmount": 3900000, "totalAmountConverted": 3900000 }
 ] }
 
 // GET /reports/sales-by-salesperson — mismas columnas + vendedor
 { "data": [
   { "month": "2026-07-01", "salespersonId": "…", "salespersonName": "Administrador General",
-    "currencyCode": "DOP", "salesCount": 1, "totalAmount": 1800000, "totalAmountConverted": 1800000 }
+    "currencyCode": "DOP", "salesCount": 1, "vehiclesCount": 2,
+    "totalAmount": 1800000, "totalAmountConverted": 1800000 }
 ] }
 ```
 
+`salesCount` cuenta **documentos** y `vehiclesCount` **unidades entregadas**: desde que una venta
+puede llevar varios vehículos, son dos cifras distintas y las dos hacen falta. Solo cuentan las
+líneas vigentes: un vehículo devuelto deja de sumar.
+
 `month` es siempre el **día 1 del mes** (`YYYY-MM-01`), no un rango: es una fecha para que ordene y
 se compare como tal.
+
+#### `GET /reports/returns-monthly`
+
+Devoluciones por mes: cuántas unidades volvieron, cuánto valían y cuánto se le reintegró al cliente.
+Leído junto al reporte de ventas da la **tasa de devolución** del período. Filtros: `dateFrom`,
+`dateTo`, `currency`.
+
+```jsonc
+{ "data": [
+  { "month": "2026-08-01", "currencyCode": "DOP",
+    "returnedCount": 1,            // unidades devueltas
+    "salesCount": 1,               // ventas distintas afectadas
+    "totalAmount": 1690000, "totalAmountConverted": 1690000,
+    "totalRefunded": 800000, "totalRefundedConverted": 800000 }
+] }
+```
+
+El mes es el de la **devolución**, no el de la venta: es cuando el hecho afecta al inventario y a la
+caja. Cuenta solo devoluciones **parciales** —la venta sigue viva—; una venta cancelada entera es
+otro evento del negocio y mezclarlos escondería las dos cifras.
 
 #### `GET /reports/expenses-monthly`
 
@@ -1227,7 +1365,19 @@ in_process ──► completed ──► cancelled
      └──────────────────────────┘
 ```
 
-`completed` exige que la venta esté totalmente pagada. `cancelled` devuelve el vehículo a inventario.
+`completed` exige que la venta esté totalmente pagada. `cancelled` devuelve **todos** los vehículos a
+inventario y marca todas sus líneas como `returned`.
+
+### Línea de venta (`status` de `items`)
+
+```
+active ──► returned
+```
+
+`returned` es terminal y **nunca borra la fila**: el vehículo volvió, pero la operación ocurrió y
+sigue siendo consultable. Devolver una unidad no es una transición de la venta: la venta sigue en el
+estado en que estaba, con el resto de sus vehículos, y su importe baja solo porque esa línea deja de
+sumar.
 
 ---
 
@@ -1276,13 +1426,23 @@ Se puede cotizar una unidad en tránsito: la empresa vende antes de que llegue a
 
 Filtra los selectores de vehículo por estado según la operación (`?status=in_inventory`).
 
-### Un vehículo, una venta vigente
+### Un vehículo, una línea de venta vigente
 
-Un vehículo no puede tener dos ventas vigentes a la vez (`409 CONFLICT`). Si la venta anterior se
-**cancela**, el vehículo vuelve a estar disponible y se puede vender de nuevo **sin borrar nada**:
-ambas ventas conviven en el historial.
+Un vehículo no puede estar en dos ventas vigentes a la vez (`409 CONFLICT`). Si la venta anterior se
+**cancela**, o si el vehículo se **devuelve**, vuelve a estar disponible y se puede vender de nuevo
+**sin borrar nada**: ambas ventas conviven en el historial.
 
 Lo mismo con las compras: un vehículo pertenece a una sola compra (`409 CONFLICT`).
+
+### Una venta, varios vehículos
+
+El importe de una venta es la suma de sus líneas vigentes, no un campo propio. Consecuencias para la
+UI:
+
+- el formulario de venta trabaja con una **lista** de vehículos, cada uno con su precio;
+- el total lo calcula el backend y llega en `salePrice`; no lo mandes tú;
+- el precio se corrige **por línea** (`PATCH /sales/:id/items/:itemId`), no en la cabecera;
+- devolver un vehículo no cancela la venta.
 
 ### Facturación: qué bloquea qué
 
@@ -1295,6 +1455,23 @@ Lo mismo con las compras: un vehículo pertenece a una sola compra (`409 CONFLIC
 - **Una venta facturada no se puede cancelar.** Primero hay que anular el comprobante emitiendo
   notas de crédito que cubran su importe; entonces la factura pasa a `cancelled` y la venta ya se
   puede cancelar. En la interfaz conviene guiar ese orden: el error explica el paso que falta.
+- **Un vehículo facturado no se puede devolver sin acreditarlo.** Con la factura `issued`, el importe
+  de esa unidad ya existe ante la DGII: sacarlo del total sin una nota de crédito dejaría la venta y
+  el comprobante contando dinero distinto. El orden es: nota de crédito con `saleItemId` por el
+  importe de la línea → emitirla → devolver el vehículo. Una factura `pending` o `rejected` no
+  bloquea, porque todavía no existe para la DGII.
+- El importe de la factura **no cambia** cuando se devuelve un vehículo: sigue siendo lo que se
+  facturó. Lo que baja es `netAmount`, por la nota de crédito.
+
+### El reembolso no es un cobro negativo
+
+Devolver dinero se registra en `POST /sales/:id/refunds`, no como un pago con importe negativo (los
+cobros solo aceptan importes positivos, por diseño). El límite es **lo cobrado menos lo ya
+reembolsado**: no se puede devolver dinero que el cliente nunca entregó.
+
+El saldo de la venta se mide siempre contra el **cobrado neto** (`totalPaid − totalRefunded`), así
+que un reembolso vuelve a abrir saldo pendiente. El reembolso lleva **su propia tasa de cambio**, la
+del día en que sale el dinero, no la de la venta.
 
 ### Cobros y cierre
 
@@ -1362,7 +1539,7 @@ Dónde mirar según la duda:
 | Transiciones de estado válidas | `src/domain/<módulo>/<entidad>.entity.ts` (constantes `…_TRANSITIONS`) |
 | El mapa completo de permisos | `src/domain/users/permissions.ts` |
 | Reglas de conversión de moneda | `src/domain/shared/money.ts` |
-| Cómo se calcula un reporte | `src/infrastructure/database/migrations/007_report_views.ts` (son vistas SQL) |
+| Cómo se calcula un reporte | `007_report_views.ts` y `008_sale_items_and_refunds.ts` en `src/infrastructure/database/migrations/` (son vistas SQL; la 008 redefine cinco de ellas y añade la de devoluciones) |
 
 Los esquemas Zod son la **fuente de verdad** de lo que acepta cada endpoint: si este documento y un
 schema discrepan, gana el schema.

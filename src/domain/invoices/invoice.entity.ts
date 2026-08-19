@@ -54,6 +54,15 @@ export interface Invoice {
 export interface CreditNote {
   readonly id: string;
   readonly invoiceId: string;
+  /**
+   * Vehiculo devuelto que la motiva; `null` = nota sobre el total de la factura
+   * (un descuento pactado, una correccion de importe).
+   *
+   * Atarla a la linea es lo que permite acreditar una unidad de una venta de
+   * varias sin anular el comprobante entero, y es lo que `return-sale-item`
+   * comprueba antes de dejar salir el vehiculo.
+   */
+  readonly saleItemId: string | null;
   readonly ncfNumber: string | null;
   readonly reason: string;
   readonly amount: number;
@@ -68,13 +77,20 @@ export interface CreditNote {
 
 export interface InvoiceWithDetails extends Invoice {
   readonly saleNumber: string;
+  /**
+   * Importe FACTURADO: suma de todas las lineas de la venta, devueltas
+   * incluidas. No es el total vigente de la venta. Un e-CF emitido no cambia de
+   * importe porque despues se devuelva un vehiculo: para eso esta la nota de
+   * credito, y `netAmount` es la resta de ambos.
+   */
   readonly salePrice: number;
   readonly currencyCode: string;
   readonly saleDate: string;
   readonly saleStatus: string;
   readonly clientName: string;
   readonly clientDocumentNumber: string;
-  readonly vehicleChassisNumber: string;
+  /** Chasis de todos los vehiculos que la factura ampara, devueltos incluidos. */
+  readonly vehicleChassisNumbers: readonly string[];
   readonly createdByName: string;
   readonly creditNotes: CreditNote[];
   /** Suma de las notas de credito EMITIDAS sobre esta factura. */
@@ -91,6 +107,7 @@ export interface NewInvoice {
 
 export interface NewCreditNote {
   readonly invoiceId: string;
+  readonly saleItemId: string | null;
   readonly reason: string;
   readonly amount: number;
   readonly createdBy: string;

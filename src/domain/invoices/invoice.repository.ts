@@ -55,4 +55,10 @@ export interface InvoiceRepository {
   markCreditNoteRejected(creditNoteId: string): Promise<CreditNote | null>;
   /** Total ya acreditado (solo notas emitidas) sobre una factura. */
   creditedAmount(invoiceId: string): Promise<number>;
+  /**
+   * Total acreditado (solo notas emitidas) sobre UNA linea de venta. Es lo que
+   * mira `return-sale-item` para saber si el vehiculo ya se puede devolver sin
+   * dejar descuadrado el comprobante.
+   */
+  creditedAmountForSaleItem(saleItemId: string): Promise<number>;
 }

@@ -53,7 +53,7 @@ export class FakeInvoiceRepository implements InvoiceRepository {
       saleStatus: 'completed',
       clientName: 'Cliente de prueba',
       clientDocumentNumber: '402-1234567-8',
-      vehicleChassisNumber: 'JT2BF22K1X0111111',
+      vehicleChassisNumbers: ['JT2BF22K1X0111111'],
       createdByName: 'Administrador General',
       creditNotes: notes,
       creditedAmount: credited,
@@ -166,6 +166,7 @@ export class FakeInvoiceRepository implements InvoiceRepository {
     const note: CreditNote = {
       id: this.nextId('cn'),
       invoiceId: data.invoiceId,
+      saleItemId: data.saleItemId,
       ncfNumber: null,
       reason: data.reason,
       amount: data.amount,
@@ -213,5 +214,11 @@ export class FakeInvoiceRepository implements InvoiceRepository {
 
   async creditedAmount(invoiceId: string): Promise<number> {
     return creditedAmount(await this.listCreditNotes(invoiceId));
+  }
+
+  async creditedAmountForSaleItem(saleItemId: string): Promise<number> {
+    return creditedAmount(
+      [...this.creditNotes.values()].filter((note) => note.saleItemId === saleItemId),
+    );
   }
 }
