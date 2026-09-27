@@ -183,7 +183,7 @@ export class UsersController {
   };
 
   permissions = (_req: Request, res: Response): void => {
-    res.json(PERMISSIONS);
+    res.json({ data: PERMISSIONS });
   };
 
   allSessions = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
