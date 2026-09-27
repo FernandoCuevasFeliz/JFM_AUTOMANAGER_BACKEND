@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { RoleRepository } from '../../../domain/users/role.entity';
 import type { TokenService } from '../../../domain/users/token-service';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 import { asyncHandler } from '../../middlewares/async-handler';
@@ -8,6 +9,7 @@ import { uuidParam } from '../shared/common.schemas';
 import type { UsersController } from './users.controller';
 import {
   changePasswordSchema,
+  createRoleSchema,
   createUserSchema,
   listUsersQuerySchema,
   loginSchema,
@@ -24,7 +26,11 @@ import {
  * justamente que el access token ya expiro. Lo que lo autoriza es el propio
  * refresh token del cuerpo.
  */
-export function buildAuthRoutes(controller: UsersController, tokens: TokenService): Router {
+export function buildAuthRoutes(
+  controller: UsersController,
+  tokens: TokenService,
+  roles: RoleRepository,
+): Router {
   const router = Router();
 
   router.post('/login', validate({ body: loginSchema }), asyncHandler(controller.login));
@@ -37,15 +43,15 @@ export function buildAuthRoutes(controller: UsersController, tokens: TokenServic
 
   router.post('/logout', validate({ body: refreshSessionSchema }), asyncHandler(controller.logout));
 
-  router.get('/me', authMiddleware(tokens), asyncHandler(controller.me));
+  router.get('/me', authMiddleware(tokens, roles), asyncHandler(controller.me));
 
-  router.get('/sessions', authMiddleware(tokens), asyncHandler(controller.sessions));
+  router.get('/sessions', authMiddleware(tokens, roles), asyncHandler(controller.sessions));
 
-  router.post('/logout-all', authMiddleware(tokens), asyncHandler(controller.logoutAll));
+  router.post('/logout-all', authMiddleware(tokens, roles), asyncHandler(controller.logoutAll));
 
   router.post(
     '/change-password',
-    authMiddleware(tokens),
+    authMiddleware(tokens, roles),
     validate({ body: changePasswordSchema }),
     asyncHandler(controller.changeOwnPassword),
   );
@@ -58,6 +64,31 @@ export function buildUsersRoutes(controller: UsersController): Router {
   const router = Router();
 
   router.get('/roles', requirePermission('users:read'), asyncHandler(controller.roles));
+
+  router.get('/permissions', requirePermission('users:read'), controller.permissions);
+
+  router.post(
+    '/roles',
+    requirePermission('users:write'),
+    validate({ body: createRoleSchema }),
+    asyncHandler(controller.createRole),
+  );
+
+  router.get('/sessions', requirePermission('users:read'), asyncHandler(controller.allSessions));
+
+  router.delete(
+    '/sessions/:id',
+    requirePermission('users:write'),
+    validate({ params: uuidParam() }),
+    asyncHandler(controller.revokeSession),
+  );
+
+  router.post(
+    '/:id/logout-all',
+    requirePermission('users:write'),
+    validate({ params: uuidParam() }),
+    asyncHandler(controller.revokeUserSessions),
+  );
 
   router.get(
     '/',

@@ -29,12 +29,12 @@ import type { Container } from './container';
  */
 export function buildRouter(container: Container): Router {
   const router = Router();
-  const { controllers, tokens, auditContext } = container;
+  const { controllers, tokens, roles, auditContext } = container;
 
-  router.use('/auth', auditContextMiddleware(auditContext), buildAuthRoutes(controllers.users, tokens));
+  router.use('/auth', auditContextMiddleware(auditContext), buildAuthRoutes(controllers.users, tokens, roles));
 
   const protectedRoutes = Router();
-  protectedRoutes.use(authMiddleware(tokens));
+  protectedRoutes.use(authMiddleware(tokens, roles));
   protectedRoutes.use(auditContextMiddleware(auditContext));
 
   protectedRoutes.use('/users', buildUsersRoutes(controllers.users));

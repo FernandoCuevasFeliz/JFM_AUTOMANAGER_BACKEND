@@ -5,9 +5,8 @@ import type { Permission } from '../../domain/users/permissions';
 /**
  * Exige que el rol del usuario tenga TODOS los permisos indicados.
  *
- * Los permisos salen del mapa `ROLE_PERMISSIONS` (dominio), no de la base:
- * este middleware solo lo consulta a traves de `req.auth.permissions`, que
- * `authMiddleware` ya resolvio.
+ * Los permisos salen de la configuracion persistida del rol y llegan resueltos
+ * en `req.auth.permissions` desde `authMiddleware`.
  */
 export function requirePermission(...permissions: Permission[]): RequestHandler {
   return (req, _res, next) => {

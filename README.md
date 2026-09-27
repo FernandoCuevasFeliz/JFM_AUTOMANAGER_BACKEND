@@ -85,7 +85,7 @@ createdb ejgh_autoimport
 npm run db:migrate
 ```
 
-Aplica ocho migraciones:
+Aplica nueve migraciones:
 
 1. **`001_initial_schema`** — transcripción literal de `schema_ejgh_autoimport.sql`: extensión
    `pgcrypto`, los 8 ENUM, las 20 tablas, índices y los triggers de `updated_at`.
@@ -102,6 +102,8 @@ Aplica ocho migraciones:
 8. **`008_sale_items_and_refunds`** — parte `sales` en cabecera y detalle (`sale_items`), añade
    `refunds` y `credit_notes.sale_item_id`, y redefine cinco de las vistas sobre el detalle más una
    nueva de devoluciones.
+9. **`009_role_permissions`** — persiste los permisos por rol y conserva las asignaciones de los
+   cuatro roles iniciales.
 
 De la tercera a la sexta modifican el esquema entregado; el porqué de cada una está en
 [Cambios sobre el esquema entregado](#cambios-sobre-el-esquema-entregado). La séptima no lo
@@ -551,6 +553,9 @@ GET  /auth/sessions    -> sesiones abiertas del propio usuario
 POST /auth/logout-all  -> cierra la sesión en todos los dispositivos
 ```
 
+Los administradores disponen además de `GET /users/sessions`, cierre individual con
+`DELETE /users/sessions/:id` y cierre por usuario con `POST /users/:id/logout-all`.
+
 De la tabla `refresh_tokens` solo sale el **SHA-256** del secreto, nunca el secreto: quien lea la
 tabla no puede suplantar a nadie, igual que con `users.password_hash`. No se usa bcrypt aquí porque
 son 384 bits aleatorios, no una frase elegida por una persona: no hay diccionario que aplicar y el
@@ -569,10 +574,11 @@ El access token ya emitido **sigue siendo válido hasta que expire**, incluso tr
 firmado no se puede invalidar. De ahí que `JWT_EXPIRES_IN` sea corto y la sesión larga la sostenga
 el refresh token, que sí es revocable.
 
-### RBAC en código de aplicación
+### RBAC configurable
 
-Por decisión de diseño la base **no modela permisos**: `roles` es un catálogo simple. El mapa
-`ROLE_PERMISSIONS` vive en `src/domain/users/permissions.ts`, versionado junto al código.
+El catálogo de permisos reconocidos vive en `src/domain/users/permissions.ts` y las asignaciones
+de cada rol se guardan en `role_permissions`. Un administrador puede crear roles desde la API y
+elegir sus capacidades sin desplegar código nuevo.
 
 Middlewares en `presentation/middlewares/rbac.middleware.ts`:
 
@@ -592,8 +598,7 @@ el rol.
 | `inventario` | vehículos, catálogo de marcas/modelos, proveedores y compras |
 | `contabilidad` | gastos y pagos; lectura de compras, ventas e inventario |
 
-Es **fail-closed**: un rol que no aparezca en el mapa no tiene ningún permiso, así que crear un rol
-nuevo en la tabla `roles` no otorga acceso hasta declararlo explícitamente en el código.
+Es **fail-closed**: un rol sin filas en `role_permissions` no tiene acceso a ningún módulo.
 
 ### Auditoría transversal
 
@@ -623,7 +628,7 @@ Todo cuelga de `/api/v1`.
 | Recurso | Endpoints |
 |---|---|
 | `/auth` | `POST /login` · `POST /refresh` · `POST /logout` · `GET /me` · `GET /sessions` · `POST /logout-all` · `POST /change-password` |
-| `/users` | `GET /roles` · CRUD · `POST /:id/reset-password` |
+| `/users` | roles y permisos · CRUD · sesiones administrativas · `POST /:id/reset-password` |
 | `/catalogs` | `GET /` (monedas, tipos de documento, métodos de pago, categorías de gasto) · `POST /expense-categories` |
 | `/vehicle-brands`, `/vehicle-models` | listar · crear · actualizar |
 | `/vehicles` | CRUD · `GET /summary` · `PATCH /:id/status` · imágenes (`/:id/images`, `…/primary`) |

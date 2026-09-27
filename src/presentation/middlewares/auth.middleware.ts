@@ -1,17 +1,17 @@
 import type { RequestHandler } from 'express';
 import { UnauthorizedError } from '../../domain/shared/domain-error';
-import { permissionsForRole } from '../../domain/users/permissions';
+import type { RoleRepository } from '../../domain/users/role.entity';
 import type { TokenService } from '../../domain/users/token-service';
 
 /**
  * Autenticacion por `Authorization: Bearer <token>`.
  *
  * Verifica la firma del JWT y deja en `req.auth` la identidad junto con los
- * permisos que el mapa `ROLE_PERMISSIONS` concede a su rol. No consulta la
- * base de datos: el token es autocontenido.
+ * permisos configurados para su rol. La consulta mantiene efectivos los
+ * cambios administrativos sin esperar a que venza el access token.
  */
-export function authMiddleware(tokens: TokenService): RequestHandler {
-  return (req, _res, next) => {
+export function authMiddleware(tokens: TokenService, roles: RoleRepository): RequestHandler {
+  return async (req, _res, next) => {
     const header = req.header('authorization');
 
     if (header === undefined || !header.toLowerCase().startsWith('bearer ')) {
@@ -27,8 +27,12 @@ export function authMiddleware(tokens: TokenService): RequestHandler {
       return;
     }
 
-    req.auth = { ...payload, permissions: permissionsForRole(payload.roleName) };
-    next();
+    try {
+      req.auth = { ...payload, permissions: await roles.permissionsForRoleId(payload.roleId) };
+      next();
+    } catch (error) {
+      next(error);
+    }
   };
 }
 

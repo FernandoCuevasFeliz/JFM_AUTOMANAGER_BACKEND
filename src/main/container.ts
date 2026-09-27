@@ -79,12 +79,16 @@ import { GetSupplierUseCase } from '../application/suppliers/get-supplier.use-ca
 import { ListSuppliersUseCase } from '../application/suppliers/list-suppliers.use-case';
 import { UpdateSupplierUseCase } from '../application/suppliers/update-supplier.use-case';
 import { AuthenticateUserUseCase } from '../application/users/authenticate-user.use-case';
+import { CreateRoleUseCase } from '../application/users/create-role.use-case';
 import { ChangePasswordUseCase } from '../application/users/change-password.use-case';
 import { SessionIssuer } from '../application/users/issue-session';
 import { LogoutUseCase } from '../application/users/logout.use-case';
 import {
   ListActiveSessionsUseCase,
+  ListAllActiveSessionsUseCase,
   LogoutAllSessionsUseCase,
+  RevokeSessionUseCase,
+  RevokeUserSessionsUseCase,
 } from '../application/users/manage-sessions.use-case';
 import { RefreshSessionUseCase } from '../application/users/refresh-session.use-case';
 import { CreateUserUseCase } from '../application/users/create-user.use-case';
@@ -113,6 +117,7 @@ import {
 import { SetPrimaryVehicleImageUseCase } from '../application/vehicles/set-primary-vehicle-image.use-case';
 import { UpdateVehicleUseCase } from '../application/vehicles/update-vehicle.use-case';
 import type { TokenService } from '../domain/users/token-service';
+import type { RoleRepository } from '../domain/users/role.entity';
 import { AsyncLocalAuditContext } from '../infrastructure/audit/async-local-audit-context';
 import { KyselyAuditLogRepository } from '../infrastructure/audit/kysely-audit-log.repository';
 import { BcryptPasswordHasher } from '../infrastructure/auth/bcrypt-password-hasher';
@@ -165,6 +170,7 @@ export interface Container {
   readonly db: Database;
   readonly pool: Pool;
   readonly tokens: TokenService;
+  readonly roles: RoleRepository;
   readonly auditContext: AsyncLocalAuditContext;
   readonly controllers: {
     readonly users: UsersController;
@@ -235,6 +241,7 @@ export function buildContainer(): Container {
     refreshTokenGenerator,
     clock,
     env.REFRESH_TOKEN_EXPIRES_IN_DAYS,
+    roles,
   );
 
   // --- Controladores --------------------------------------------------------
@@ -250,9 +257,17 @@ export function buildContainer(): Container {
     logout: new LogoutUseCase(refreshTokens, refreshTokenGenerator),
     listActiveSessions: new ListActiveSessionsUseCase(refreshTokens),
     logoutAllSessions: new LogoutAllSessionsUseCase(refreshTokens),
+    listAllActiveSessions: new ListAllActiveSessionsUseCase(refreshTokens),
+    revokeSession: new RevokeSessionUseCase(refreshTokens),
+    revokeUserSessions: new RevokeUserSessionsUseCase(refreshTokens),
     getUser: new GetUserUseCase(users),
     listUsers: new ListUsersUseCase(users),
     listRoles: new ListRolesUseCase(roles),
+    createRole: withAudit(
+      new CreateRoleUseCase(roles),
+      { table: 'roles', action: 'insert', recordIdFromOutput: (role) => role.id },
+      audit,
+    ),
     createUser: withAudit(
       new CreateUserUseCase(users, roles, passwordHasher),
       { table: 'users', action: 'insert', recordIdFromOutput: (user) => user.id },
@@ -648,6 +663,7 @@ export function buildContainer(): Container {
     db,
     pool,
     tokens,
+    roles,
     auditContext,
     controllers: {
       users: usersController,

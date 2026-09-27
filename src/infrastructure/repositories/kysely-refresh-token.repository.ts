@@ -2,6 +2,7 @@ import type { Selectable } from 'kysely';
 import { sql } from 'kysely';
 import type {
   ActiveSession,
+  ManagedSession,
   NewRefreshToken,
   RefreshToken,
 } from '../../domain/users/refresh-token.entity';
@@ -87,6 +88,41 @@ export class KyselyRefreshTokenRepository implements RefreshTokenRepository {
 
     return rows.map((row) => ({
       id: row.id,
+      userAgent: row.user_agent,
+      ipAddress: row.ip_address,
+      createdAt: toDate(row.created_at),
+      expiresAt: toDate(row.expires_at),
+    }));
+  }
+
+  async listAllActiveSessions(): Promise<ManagedSession[]> {
+    const rows = await this.db
+      .selectFrom('refresh_tokens')
+      .innerJoin('users', 'users.id', 'refresh_tokens.user_id')
+      .select([
+        'refresh_tokens.id',
+        'refresh_tokens.user_id',
+        'refresh_tokens.user_agent',
+        'refresh_tokens.ip_address',
+        'refresh_tokens.created_at',
+        'refresh_tokens.expires_at',
+        'users.first_name',
+        'users.last_name',
+        'users.email',
+      ])
+      .where('refresh_tokens.revoked_at', 'is', null)
+      .where('refresh_tokens.expires_at', '>', sql<Date>`now()`)
+      .where('users.deleted_at', 'is', null)
+      .orderBy('users.first_name', 'asc')
+      .orderBy('users.last_name', 'asc')
+      .orderBy('refresh_tokens.created_at', 'desc')
+      .execute();
+
+    return rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      userName: `${row.first_name} ${row.last_name}`.trim(),
+      userEmail: row.email,
       userAgent: row.user_agent,
       ipAddress: row.ip_address,
       createdAt: toDate(row.created_at),

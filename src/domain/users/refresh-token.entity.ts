@@ -33,6 +33,13 @@ export interface ActiveSession {
   readonly expiresAt: Date;
 }
 
+/** Sesion visible para administracion, identificada con su propietario. */
+export interface ManagedSession extends ActiveSession {
+  readonly userId: string;
+  readonly userName: string;
+  readonly userEmail: string;
+}
+
 export function isRefreshTokenUsable(token: RefreshToken, now: Date): boolean {
   return token.revokedAt === null && token.expiresAt.getTime() > now.getTime();
 }

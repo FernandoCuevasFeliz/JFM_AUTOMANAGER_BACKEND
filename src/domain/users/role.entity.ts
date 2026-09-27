@@ -1,3 +1,5 @@
+import type { Permission } from './permissions';
+
 export interface Role {
   readonly id: string;
   readonly name: string;
@@ -7,8 +9,21 @@ export interface Role {
   readonly updatedAt: Date;
 }
 
+export interface RoleWithPermissions extends Role {
+  readonly permissions: readonly Permission[];
+}
+
+export interface NewRole {
+  readonly name: string;
+  readonly description: string | null;
+  readonly permissions: readonly Permission[];
+}
+
 export interface RoleRepository {
   findById(id: string): Promise<Role | null>;
   findByName(name: string): Promise<Role | null>;
   listActive(): Promise<Role[]>;
+  listActiveWithPermissions(): Promise<RoleWithPermissions[]>;
+  permissionsForRoleId(roleId: string): Promise<readonly Permission[]>;
+  create(data: NewRole): Promise<RoleWithPermissions>;
 }

@@ -1,4 +1,4 @@
-import type { ActiveSession, NewRefreshToken, RefreshToken } from './refresh-token.entity';
+import type { ActiveSession, ManagedSession, NewRefreshToken, RefreshToken } from './refresh-token.entity';
 
 export interface RefreshTokenRepository {
   create(data: NewRefreshToken): Promise<RefreshToken>;
@@ -11,6 +11,7 @@ export interface RefreshTokenRepository {
    */
   revokeAllForUser(userId: string): Promise<number>;
   listActiveSessions(userId: string): Promise<ActiveSession[]>;
+  listAllActiveSessions(): Promise<ManagedSession[]>;
   /** Elimina tokens vencidos hace tiempo. Devuelve cuantos se borraron. */
   deleteExpiredBefore(cutoff: Date): Promise<number>;
 }

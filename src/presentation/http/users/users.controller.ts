@@ -1,8 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
+import { PERMISSIONS } from '../../../domain/users/permissions';
 import type { UseCaseOf } from '../../../application/shared/use-case';
 import type { AuthenticateUserUseCase } from '../../../application/users/authenticate-user.use-case';
 import type { ChangePasswordUseCase } from '../../../application/users/change-password.use-case';
 import type { CreateUserUseCase } from '../../../application/users/create-user.use-case';
+import type { CreateRoleUseCase } from '../../../application/users/create-role.use-case';
 import type { DeleteUserUseCase } from '../../../application/users/delete-user.use-case';
 import type { GetUserUseCase } from '../../../application/users/get-user.use-case';
 import type { ListRolesUseCase } from '../../../application/users/list-roles.use-case';
@@ -10,7 +12,10 @@ import type { ListUsersUseCase } from '../../../application/users/list-users.use
 import type { LogoutUseCase } from '../../../application/users/logout.use-case';
 import type {
   ListActiveSessionsUseCase,
+  ListAllActiveSessionsUseCase,
   LogoutAllSessionsUseCase,
+  RevokeSessionUseCase,
+  RevokeUserSessionsUseCase,
 } from '../../../application/users/manage-sessions.use-case';
 import type { RefreshSessionUseCase } from '../../../application/users/refresh-session.use-case';
 import type { UpdateUserUseCase } from '../../../application/users/update-user.use-case';
@@ -19,6 +24,7 @@ import { compact, toPageQuery } from '../shared/common.schemas';
 import { sendPaginated, sendResult } from '../shared/http-response';
 import type {
   ChangePasswordBody,
+  CreateRoleBody,
   CreateUserBody,
   ListUsersQuery,
   LoginBody,
@@ -48,10 +54,14 @@ export interface UsersControllerDeps {
   readonly deleteUser: UseCaseOf<DeleteUserUseCase>;
   readonly changePassword: UseCaseOf<ChangePasswordUseCase>;
   readonly listRoles: UseCaseOf<ListRolesUseCase>;
+  readonly createRole: UseCaseOf<CreateRoleUseCase>;
   readonly refreshSession: UseCaseOf<RefreshSessionUseCase>;
   readonly logout: UseCaseOf<LogoutUseCase>;
   readonly listActiveSessions: UseCaseOf<ListActiveSessionsUseCase>;
   readonly logoutAllSessions: UseCaseOf<LogoutAllSessionsUseCase>;
+  readonly listAllActiveSessions: UseCaseOf<ListAllActiveSessionsUseCase>;
+  readonly revokeSession: UseCaseOf<RevokeSessionUseCase>;
+  readonly revokeUserSessions: UseCaseOf<RevokeUserSessionsUseCase>;
 }
 
 export class UsersController {
@@ -164,6 +174,29 @@ export class UsersController {
 
   roles = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
     const result = await this.deps.listRoles.execute(undefined);
+    sendResult(res, next, result);
+  };
+
+  createRole = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.createRole.execute(req.body as CreateRoleBody);
+    sendResult(res, next, result, 201);
+  };
+
+  permissions = (_req: Request, res: Response): void => {
+    res.json(PERMISSIONS);
+  };
+
+  allSessions = async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    sendResult(res, next, await this.deps.listAllActiveSessions.execute(undefined));
+  };
+
+  revokeSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.revokeSession.execute({ sessionId: req.params.id as string });
+    sendResult(res, next, result, 204);
+  };
+
+  revokeUserSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.revokeUserSessions.execute({ userId: req.params.id as string });
     sendResult(res, next, result);
   };
 }

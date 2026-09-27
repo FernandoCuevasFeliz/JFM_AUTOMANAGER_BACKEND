@@ -2,11 +2,14 @@ import type { Clock } from '../../src/domain/shared/clock';
 import type { PageQuery, PaginatedResult } from '../../src/domain/shared/pagination';
 import type {
   ActiveSession,
+  ManagedSession,
   NewRefreshToken,
   RefreshToken,
   RefreshTokenGenerator,
 } from '../../src/domain/users/refresh-token.entity';
 import type { RefreshTokenRepository } from '../../src/domain/users/refresh-token.repository';
+import type { Permission } from '../../src/domain/users/permissions';
+import type { NewRole, Role, RoleRepository, RoleWithPermissions } from '../../src/domain/users/role.entity';
 import type {
   AuthTokenPayload,
   IssuedToken,
@@ -127,6 +130,23 @@ export class FakeRefreshTokenRepository implements RefreshTokenRepository {
       }));
   }
 
+  async listAllActiveSessions(): Promise<ManagedSession[]> {
+    return [...this.tokens.values()]
+      .filter(
+        (token) => token.revokedAt === null && token.expiresAt.getTime() > this.clock.now().getTime(),
+      )
+      .map((token) => ({
+        id: token.id,
+        userId: token.userId,
+        userName: token.userId,
+        userEmail: `${token.userId}@example.com`,
+        userAgent: token.userAgent,
+        ipAddress: token.ipAddress,
+        createdAt: token.createdAt,
+        expiresAt: token.expiresAt,
+      }));
+  }
+
   async deleteExpiredBefore(cutoff: Date): Promise<number> {
     let deleted = 0;
     for (const [id, token] of this.tokens) {
@@ -143,6 +163,19 @@ export class FakeRefreshTokenRepository implements RefreshTokenRepository {
     return [...this.tokens.values()].filter(
       (token) => token.userId === userId && token.revokedAt === null,
     ).length;
+  }
+}
+
+export class FakeRoleRepository implements RoleRepository {
+  constructor(private readonly permissions: readonly Permission[] = ['users:read']) {}
+
+  async findById(): Promise<Role | null> { return null; }
+  async findByName(): Promise<Role | null> { return null; }
+  async listActive(): Promise<Role[]> { return []; }
+  async listActiveWithPermissions(): Promise<RoleWithPermissions[]> { return []; }
+  async permissionsForRoleId(): Promise<readonly Permission[]> { return this.permissions; }
+  async create(_data: NewRole): Promise<RoleWithPermissions> {
+    throw new Error('no usado en estos tests');
   }
 }
 

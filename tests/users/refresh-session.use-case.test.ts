@@ -5,6 +5,7 @@ import { RefreshSessionUseCase } from '../../src/application/users/refresh-sessi
 import {
   FakeRefreshTokenGenerator,
   FakeRefreshTokenRepository,
+  FakeRoleRepository,
   FakeTokenService,
   FakeUserRepository,
   FixedClock,
@@ -44,6 +45,7 @@ describe('RefreshSessionUseCase', () => {
       generator,
       clock,
       REFRESH_TTL_DAYS,
+      new FakeRoleRepository(),
     );
     useCase = new RefreshSessionUseCase(refreshTokens, users, generator, issuer, clock);
   });
@@ -152,7 +154,9 @@ describe('LogoutUseCase', () => {
     const clock = new FixedClock(new Date('2026-03-01T12:00:00Z'));
     const refreshTokens = new FakeRefreshTokenRepository(clock);
     const generator = new FakeRefreshTokenGenerator();
-    const issuer = new SessionIssuer(new FakeTokenService(), refreshTokens, generator, clock, 30);
+    const issuer = new SessionIssuer(
+      new FakeTokenService(), refreshTokens, generator, clock, 30, new FakeRoleRepository(),
+    );
     const logout = new LogoutUseCase(refreshTokens, generator);
 
     const session = await issuer.issue(makeUserWithRole(), {

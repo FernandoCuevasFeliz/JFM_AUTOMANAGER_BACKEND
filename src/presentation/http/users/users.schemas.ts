@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PERMISSIONS } from '../../../domain/users/permissions';
 import { booleanQuery, nullableString, paginationQuery, requiredString, uuid } from '../shared/common.schemas';
 
 /**
@@ -64,6 +65,17 @@ export const listUsersQuerySchema = paginationQuery.extend({
   isActive: booleanQuery,
 });
 
+export const createRoleSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, 'El nombre del rol debe tener al menos 2 caracteres')
+    .max(50, 'El nombre del rol no puede superar los 50 caracteres')
+    .regex(/^[a-zA-Z0-9_-]+$/, 'Usa solo letras, numeros, guion y guion bajo'),
+  description: nullableString(255),
+  permissions: z.array(z.enum(PERMISSIONS)).min(1, 'Selecciona al menos un permiso'),
+});
+
 export type LoginBody = z.infer<typeof loginSchema>;
 export type RefreshSessionBody = z.infer<typeof refreshSessionSchema>;
 export type CreateUserBody = z.infer<typeof createUserSchema>;
@@ -71,3 +83,4 @@ export type UpdateUserBody = z.infer<typeof updateUserSchema>;
 export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;
 export type ResetPasswordBody = z.infer<typeof resetPasswordSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
+export type CreateRoleBody = z.infer<typeof createRoleSchema>;

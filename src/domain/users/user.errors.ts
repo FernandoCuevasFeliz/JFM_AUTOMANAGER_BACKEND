@@ -34,6 +34,12 @@ export class RoleNotFoundError extends NotFoundError {
   }
 }
 
+export class RoleNameAlreadyInUseError extends ConflictError {
+  constructor(name: string) {
+    super(`Ya existe un rol con el nombre ${name}`, { field: 'name', name });
+  }
+}
+
 export class CannotDeleteSelfError extends BusinessRuleError {
   constructor() {
     super('Un usuario no puede eliminar su propia cuenta');

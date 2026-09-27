@@ -76,6 +76,12 @@ export interface RolesTable {
   updated_at: GeneratedTimestamp;
 }
 
+export interface RolePermissionsTable {
+  role_id: string;
+  permission: string;
+  created_at: GeneratedTimestamp;
+}
+
 export interface DocumentTypesTable {
   id: Generated<string>;
   name: string;
@@ -572,6 +578,7 @@ export interface DB {
   refunds: RefundsTable;
   reservations: ReservationsTable;
   roles: RolesTable;
+  role_permissions: RolePermissionsTable;
   sale_items: SaleItemsTable;
   sale_payments: SalePaymentsTable;
   sales: SalesTable;

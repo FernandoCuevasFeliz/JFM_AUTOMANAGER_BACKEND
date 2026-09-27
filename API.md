@@ -286,8 +286,9 @@ XSS. Es decisión del frontend.
 
 ## 3. Permisos por rol
 
-El backend **no** modela permisos en la base de datos: viven en el código. Cada rol tiene una lista
-fija, y el login y el refresco te la devuelven en `permissions`.
+El backend define en código el catálogo de capacidades válidas y guarda en `role_permissions` las
+capacidades asignadas a cada rol. El login y el refresco devuelven la asignación actual en
+`permissions`.
 
 **Usa ese array para decidir qué mostrar.** No codifiques `if (rol === 'admin')` en el frontend: si
 mañana cambia el mapa de permisos, tu interfaz quedaría desincronizada.
@@ -338,8 +339,8 @@ lógico). Las acciones propias del negocio llevan su verbo: `vehicles:change-sta
 | `audit:read` | ✅ | — | — | — |
 | `reports:read` | ✅ | ✅ | ✅ | ✅ |
 
-La fuente de verdad es `src/domain/users/permissions.ts`. Un rol que no aparezca en ese mapa **no
-tiene ningún permiso** (fail-closed).
+La fuente de verdad del catálogo es `src/domain/users/permissions.ts`; la asignación de cada rol
+vive en la base. Un rol sin permisos asignados no tiene acceso (fail-closed).
 
 > **Dos permisos están declarados pero todavía no tienen endpoint**: `audit:read` (no hay API de
 > consulta de `audit_logs`; la tabla se escribe pero no se lee) y `reservations:delete` (las reservas
@@ -431,6 +432,11 @@ históricos apuntando a ellos.
 | Método | Ruta | Permiso |
 |---|---|---|
 | `GET` | `/users/roles` | `users:read` |
+| `GET` | `/users/permissions` | `users:read` |
+| `POST` | `/users/roles` | `users:write` |
+| `GET` | `/users/sessions` | `users:read` |
+| `DELETE` | `/users/sessions/:id` | `users:write` |
+| `POST` | `/users/:id/logout-all` | `users:write` |
 | `GET` | `/users` | `users:read` |
 | `GET` | `/users/:id` | `users:read` |
 | `POST` | `/users` | `users:write` |
@@ -459,6 +465,18 @@ Filtros del listado: `search` (nombre, apellido, correo), `roleId`, `isActive`.
 { "data": [{ "id": "…", "name": "ventas", "description": "Gestion de cotizaciones…",
              "isActive": true, "permissions": ["catalogs:read", "vehicles:read", …] }] }
 ```
+
+`GET /users/permissions` devuelve el catálogo de permisos seleccionables. Para crear un rol:
+
+```jsonc
+// POST /users/roles
+{ "name": "supervisor_ventas", "description": "Supervisa el equipo comercial",
+  "permissions": ["sales:read", "sales:write", "reports:read"] }
+```
+
+`GET /users/sessions` identifica cada sesión con `userId`, `userName` y `userEmail`. El cierre
+individual o por usuario revoca sus refresh tokens; el access token ya emitido conserva su corta
+vigencia normal.
 
 El hash de contraseña **nunca** viaja en ninguna respuesta.
 

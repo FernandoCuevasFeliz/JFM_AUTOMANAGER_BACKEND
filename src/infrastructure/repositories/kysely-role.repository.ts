@@ -1,6 +1,7 @@
 import type { Selectable } from 'kysely';
-import type { Role, RoleRepository } from '../../domain/users/role.entity';
-import type { Executor } from '../database/connection';
+import { isPermission, type Permission } from '../../domain/users/permissions';
+import type { NewRole, Role, RoleRepository, RoleWithPermissions } from '../../domain/users/role.entity';
+import type { Database } from '../database/connection';
 import type { RolesTable } from '../database/database.types';
 import { toDate } from './mappers';
 
@@ -16,7 +17,7 @@ function mapRole(row: Selectable<RolesTable>): Role {
 }
 
 export class KyselyRoleRepository implements RoleRepository {
-  constructor(private readonly db: Executor) {}
+  constructor(private readonly db: Database) {}
 
   async findById(id: string): Promise<Role | null> {
     const row = await this.db
@@ -47,5 +48,55 @@ export class KyselyRoleRepository implements RoleRepository {
       .execute();
 
     return rows.map(mapRole);
+  }
+
+  async permissionsForRoleId(roleId: string): Promise<readonly Permission[]> {
+    const rows = await this.db
+      .selectFrom('role_permissions')
+      .select('permission')
+      .where('role_id', '=', roleId)
+      .orderBy('permission', 'asc')
+      .execute();
+
+    return rows.map((row) => row.permission).filter(isPermission);
+  }
+
+  async listActiveWithPermissions(): Promise<RoleWithPermissions[]> {
+    const roles = await this.listActive();
+    const permissions = await this.db
+      .selectFrom('role_permissions')
+      .select(['role_id', 'permission'])
+      .where('role_id', 'in', roles.map((role) => role.id))
+      .orderBy('permission', 'asc')
+      .execute();
+
+    const byRole = new Map<string, Permission[]>();
+    for (const row of permissions) {
+      if (!isPermission(row.permission)) continue;
+      const current = byRole.get(row.role_id) ?? [];
+      current.push(row.permission);
+      byRole.set(row.role_id, current);
+    }
+
+    return roles.map((role) => ({ ...role, permissions: byRole.get(role.id) ?? [] }));
+  }
+
+  async create(data: NewRole): Promise<RoleWithPermissions> {
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx
+        .insertInto('roles')
+        .values({ name: data.name, description: data.description })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      if (data.permissions.length > 0) {
+        await trx
+          .insertInto('role_permissions')
+          .values(data.permissions.map((permission) => ({ role_id: row.id, permission })))
+          .execute();
+      }
+
+      return { ...mapRole(row), permissions: data.permissions };
+    });
   }
 }

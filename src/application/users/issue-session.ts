@@ -1,5 +1,6 @@
 import type { Clock } from '../../domain/shared/clock';
-import { type Permission, permissionsForRole } from '../../domain/users/permissions';
+import type { Permission } from '../../domain/users/permissions';
+import type { RoleRepository } from '../../domain/users/role.entity';
 import type { RefreshTokenGenerator } from '../../domain/users/refresh-token.entity';
 import type { RefreshTokenRepository } from '../../domain/users/refresh-token.repository';
 import type { TokenService } from '../../domain/users/token-service';
@@ -36,6 +37,7 @@ export class SessionIssuer {
     private readonly generator: RefreshTokenGenerator,
     private readonly clock: Clock,
     private readonly refreshTtlDays: number,
+    private readonly roles: RoleRepository,
   ) {}
 
   async issue(user: UserWithRole, context: SessionContext): Promise<IssuedSession> {
@@ -60,13 +62,15 @@ export class SessionIssuer {
       ipAddress: context.ipAddress,
     });
 
+    const permissions = await this.roles.permissionsForRoleId(user.roleId);
+
     return {
       accessToken: access.token,
       expiresAt: access.expiresAt,
       refreshToken,
       refreshExpiresAt,
       user: { ...toPublicUser(user), roleName: user.roleName },
-      permissions: permissionsForRole(user.roleName),
+      permissions,
     };
   }
 }
