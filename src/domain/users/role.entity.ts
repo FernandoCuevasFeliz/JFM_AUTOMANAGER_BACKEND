@@ -19,6 +19,8 @@ export interface NewRole {
   readonly permissions: readonly Permission[];
 }
 
+export type RoleUpdate = NewRole;
+
 export interface RoleRepository {
   findById(id: string): Promise<Role | null>;
   findByName(name: string): Promise<Role | null>;
@@ -26,4 +28,5 @@ export interface RoleRepository {
   listActiveWithPermissions(): Promise<RoleWithPermissions[]>;
   permissionsForRoleId(roleId: string): Promise<readonly Permission[]>;
   create(data: NewRole): Promise<RoleWithPermissions>;
+  update(id: string, data: RoleUpdate): Promise<RoleWithPermissions | null>;
 }

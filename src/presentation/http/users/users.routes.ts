@@ -16,6 +16,7 @@ import {
   refreshSessionSchema,
   resetPasswordSchema,
   updateUserSchema,
+  updateRoleSchema,
 } from './users.schemas';
 
 /**
@@ -72,6 +73,13 @@ export function buildUsersRoutes(controller: UsersController): Router {
     requirePermission('users:write'),
     validate({ body: createRoleSchema }),
     asyncHandler(controller.createRole),
+  );
+
+  router.patch(
+    '/roles/:id',
+    requirePermission('users:write'),
+    validate({ params: uuidParam(), body: updateRoleSchema }),
+    asyncHandler(controller.updateRole),
   );
 
   router.get('/sessions', requirePermission('users:read'), asyncHandler(controller.allSessions));

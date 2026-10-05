@@ -174,9 +174,12 @@ export class FakeRoleRepository implements RoleRepository {
   async listActive(): Promise<Role[]> { return []; }
   async listActiveWithPermissions(): Promise<RoleWithPermissions[]> { return []; }
   async permissionsForRoleId(): Promise<readonly Permission[]> { return this.permissions; }
-  async create(_data: NewRole): Promise<RoleWithPermissions> {
-    throw new Error('no usado en estos tests');
-  }
+    async create(_data: NewRole): Promise<RoleWithPermissions> {
+      throw new Error('no usado en estos tests');
+    }
+    async update(): Promise<RoleWithPermissions | null> {
+      throw new Error('no usado en estos tests');
+    }
 }
 
 export function makeUserWithRole(overrides: Partial<UserWithRole> = {}): UserWithRole {

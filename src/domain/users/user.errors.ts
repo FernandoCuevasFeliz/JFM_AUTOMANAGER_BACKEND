@@ -46,6 +46,12 @@ export class CannotDeleteSelfError extends BusinessRuleError {
   }
 }
 
+export class CannotEditOwnRoleError extends BusinessRuleError {
+  constructor() {
+    super('No puedes editar el rol asignado a tu propia cuenta');
+  }
+}
+
 export class SamePasswordError extends BusinessRuleError {
   constructor() {
     super('La nueva contrasena debe ser distinta de la actual');

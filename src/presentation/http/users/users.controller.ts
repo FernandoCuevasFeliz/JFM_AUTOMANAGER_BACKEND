@@ -5,6 +5,7 @@ import type { AuthenticateUserUseCase } from '../../../application/users/authent
 import type { ChangePasswordUseCase } from '../../../application/users/change-password.use-case';
 import type { CreateUserUseCase } from '../../../application/users/create-user.use-case';
 import type { CreateRoleUseCase } from '../../../application/users/create-role.use-case';
+import type { UpdateRoleUseCase } from '../../../application/users/update-role.use-case';
 import type { DeleteUserUseCase } from '../../../application/users/delete-user.use-case';
 import type { GetUserUseCase } from '../../../application/users/get-user.use-case';
 import type { ListRolesUseCase } from '../../../application/users/list-roles.use-case';
@@ -31,6 +32,7 @@ import type {
   RefreshSessionBody,
   ResetPasswordBody,
   UpdateUserBody,
+  UpdateRoleBody,
 } from './users.schemas';
 
 /**
@@ -55,6 +57,7 @@ export interface UsersControllerDeps {
   readonly changePassword: UseCaseOf<ChangePasswordUseCase>;
   readonly listRoles: UseCaseOf<ListRolesUseCase>;
   readonly createRole: UseCaseOf<CreateRoleUseCase>;
+  readonly updateRole: UseCaseOf<UpdateRoleUseCase>;
   readonly refreshSession: UseCaseOf<RefreshSessionUseCase>;
   readonly logout: UseCaseOf<LogoutUseCase>;
   readonly listActiveSessions: UseCaseOf<ListActiveSessionsUseCase>;
@@ -180,6 +183,16 @@ export class UsersController {
   createRole = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const result = await this.deps.createRole.execute(req.body as CreateRoleBody);
     sendResult(res, next, result, 201);
+  };
+
+  updateRole = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const body = req.body as UpdateRoleBody;
+    const result = await this.deps.updateRole.execute({
+      roleId: req.params.id as string,
+      actorUserId: requireActorId(req),
+      ...body,
+    });
+    sendResult(res, next, result);
   };
 
   permissions = (_req: Request, res: Response): void => {

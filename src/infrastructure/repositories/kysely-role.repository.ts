@@ -1,6 +1,6 @@
 import type { Selectable } from 'kysely';
 import { isPermission, type Permission } from '../../domain/users/permissions';
-import type { NewRole, Role, RoleRepository, RoleWithPermissions } from '../../domain/users/role.entity';
+import type { NewRole, Role, RoleRepository, RoleUpdate, RoleWithPermissions } from '../../domain/users/role.entity';
 import type { Database } from '../database/connection';
 import type { RolesTable } from '../database/database.types';
 import { toDate } from './mappers';
@@ -93,6 +93,29 @@ export class KyselyRoleRepository implements RoleRepository {
         await trx
           .insertInto('role_permissions')
           .values(data.permissions.map((permission) => ({ role_id: row.id, permission })))
+          .execute();
+      }
+
+      return { ...mapRole(row), permissions: data.permissions };
+    });
+  }
+
+  async update(id: string, data: RoleUpdate): Promise<RoleWithPermissions | null> {
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx
+        .updateTable('roles')
+        .set({ name: data.name, description: data.description, updated_at: new Date() })
+        .where('id', '=', id)
+        .returningAll()
+        .executeTakeFirst();
+
+      if (row === undefined) return null;
+
+      await trx.deleteFrom('role_permissions').where('role_id', '=', id).execute();
+      if (data.permissions.length > 0) {
+        await trx
+          .insertInto('role_permissions')
+          .values(data.permissions.map((permission) => ({ role_id: id, permission })))
           .execute();
       }
 

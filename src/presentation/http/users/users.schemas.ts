@@ -76,6 +76,8 @@ export const createRoleSchema = z.object({
   permissions: z.array(z.enum(PERMISSIONS)).min(1, 'Selecciona al menos un permiso'),
 });
 
+export const updateRoleSchema = createRoleSchema;
+
 export type LoginBody = z.infer<typeof loginSchema>;
 export type RefreshSessionBody = z.infer<typeof refreshSessionSchema>;
 export type CreateUserBody = z.infer<typeof createUserSchema>;
@@ -84,3 +86,4 @@ export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;
 export type ResetPasswordBody = z.infer<typeof resetPasswordSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 export type CreateRoleBody = z.infer<typeof createRoleSchema>;
+export type UpdateRoleBody = z.infer<typeof updateRoleSchema>;
