@@ -150,6 +150,7 @@ export class FakeVehicleRepository implements VehicleRepository {
     const vehicle: Vehicle = {
       id: nextId('vehicle'),
       ...data,
+      brandId: brandForModel(data.modelId),
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
@@ -163,7 +164,12 @@ export class FakeVehicleRepository implements VehicleRepository {
     if (existing === null) {
       return null;
     }
-    const updated: Vehicle = { ...existing, ...data, updatedAt: new Date() };
+    const updated: Vehicle = {
+      ...existing,
+      ...data,
+      ...(data.modelId !== undefined ? { brandId: brandForModel(data.modelId) } : {}),
+      updatedAt: new Date(),
+    };
     this.vehicles.set(id, updated);
     return updated;
   }
@@ -244,6 +250,10 @@ export class FakeVehicleRepository implements VehicleRepository {
     }
     return this.images.get(imageId) ?? null;
   }
+}
+
+function brandForModel(modelId: string): string {
+  return modelId === 'model-2' ? 'brand-2' : 'brand-1';
 }
 
 export class FakeVehicleCatalogRepository implements VehicleCatalogRepository {

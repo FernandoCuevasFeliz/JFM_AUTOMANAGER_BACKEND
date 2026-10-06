@@ -36,8 +36,9 @@ export interface CreateVehicleInput {
  * Alta de un vehiculo en el inventario.
  *
  * Invariantes que verifica antes de escribir:
- *  1. La marca y el modelo existen y el modelo pertenece a esa marca (la base
- *     guarda ambas FK por separado y no puede garantizar la coherencia).
+ *  1. La marca y el modelo existen y el modelo pertenece a esa marca. La base
+ *     solo persiste `model_id`; `brandId` es una seleccion de interfaz que se
+ *     valida aqui y luego se deriva siempre desde el modelo.
  *  2. El numero de chasis (VIN) no esta repetido. Se comprueba aqui para
  *     devolver un 409 con mensaje de negocio en lugar del error de constraint.
  *  3. No se crea un vehiculo directamente como `reserved` ni `sold`: esos
@@ -73,7 +74,6 @@ export class CreateVehicleUseCase implements UseCase<CreateVehicleInput, Vehicle
     }
 
     const vehicle = await this.vehicles.create({
-      brandId: input.brandId,
       modelId: input.modelId,
       year: input.year,
       chassisNumber,

@@ -719,8 +719,8 @@ export class KyselySaleRepository implements SaleRepository {
     const rows = await this.db
       .selectFrom('sale_items')
       .innerJoin('vehicles', 'vehicles.id', 'sale_items.vehicle_id')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .selectAll('sale_items')
       .select([
         'vehicles.chassis_number as chassis_number',

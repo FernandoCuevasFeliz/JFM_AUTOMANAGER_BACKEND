@@ -72,7 +72,6 @@ export class UpdateVehicleUseCase implements UseCase<UpdateVehicleInput, Vehicle
     }
 
     const updated = await this.vehicles.update(input.vehicleId, {
-      ...(input.brandId !== undefined ? { brandId: input.brandId } : {}),
       ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
       ...(input.year !== undefined ? { year: input.year } : {}),
       ...(chassisNumber !== undefined ? { chassisNumber } : {}),

@@ -255,8 +255,8 @@ export class KyselyReservationRepository implements ReservationRepository {
       .selectFrom('reservations')
       .innerJoin('clients', 'clients.id', 'reservations.client_id')
       .innerJoin('vehicles', 'vehicles.id', 'reservations.vehicle_id')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .innerJoin('users', 'users.id', 'reservations.created_by')
       .leftJoin('quotations', 'quotations.id', 'reservations.quotation_id');
   }

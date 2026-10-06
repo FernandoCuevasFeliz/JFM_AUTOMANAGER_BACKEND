@@ -57,7 +57,6 @@ export interface VehicleImage {
 }
 
 export interface NewVehicle {
-  readonly brandId: string;
   readonly modelId: string;
   readonly year: number;
   readonly chassisNumber: string;
@@ -73,7 +72,6 @@ export interface NewVehicle {
 }
 
 export interface VehicleUpdate {
-  readonly brandId?: string;
   readonly modelId?: string;
   readonly year?: number;
   readonly chassisNumber?: string;

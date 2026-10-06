@@ -244,8 +244,8 @@ export class KyselyQuotationRepository implements QuotationRepository {
       .selectFrom('quotations')
       .innerJoin('clients', 'clients.id', 'quotations.client_id')
       .innerJoin('vehicles', 'vehicles.id', 'quotations.vehicle_id')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .innerJoin('currencies', 'currencies.id', 'quotations.currency_id')
       .innerJoin('users', 'users.id', 'quotations.created_by');
   }

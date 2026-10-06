@@ -363,8 +363,8 @@ export class KyselyPurchaseRepository implements PurchaseRepository {
     const rows = await this.db
       .selectFrom('purchase_items')
       .innerJoin('vehicles', 'vehicles.id', 'purchase_items.vehicle_id')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .selectAll('purchase_items')
       .select([
         'vehicles.chassis_number',

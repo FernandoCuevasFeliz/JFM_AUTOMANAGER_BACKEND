@@ -216,7 +216,6 @@ export interface SuppliersTable {
 
 export interface VehiclesTable {
   id: Generated<string>;
-  brand_id: string;
   model_id: string;
   year: number;
   chassis_number: string;

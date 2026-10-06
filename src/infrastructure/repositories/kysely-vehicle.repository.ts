@@ -20,7 +20,7 @@ import type { Executor } from '../database/connection';
 import type { VehicleImagesTable, VehiclesTable } from '../database/database.types';
 import { isEmptyPatch, likePattern, toDate, toNullableDate, toNullableNumber } from './mappers';
 
-type VehicleRow = Selectable<VehiclesTable>;
+type VehicleRow = Selectable<VehiclesTable> & { brand_id: string };
 type VehicleImageRow = Selectable<VehicleImagesTable>;
 
 function mapVehicle(row: VehicleRow): Vehicle {
@@ -62,9 +62,11 @@ export class KyselyVehicleRepository implements VehicleRepository {
   async findById(id: string): Promise<Vehicle | null> {
     const row = await this.db
       .selectFrom('vehicles')
-      .selectAll()
-      .where('id', '=', id)
-      .where('deleted_at', 'is', null)
+      .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .selectAll('vehicles')
+      .select('vehicle_models.brand_id as brand_id')
+      .where('vehicles.id', '=', id)
+      .where('vehicles.deleted_at', 'is', null)
       .executeTakeFirst();
 
     return row === undefined ? null : mapVehicle(row);
@@ -73,10 +75,14 @@ export class KyselyVehicleRepository implements VehicleRepository {
   async findByIdWithDetails(id: string): Promise<VehicleWithDetails | null> {
     const row = await this.db
       .selectFrom('vehicles')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .selectAll('vehicles')
-      .select(['vehicle_brands.name as brand_name', 'vehicle_models.name as model_name'])
+      .select([
+        'vehicle_models.brand_id as brand_id',
+        'vehicle_brands.name as brand_name',
+        'vehicle_models.name as model_name',
+      ])
       .where('vehicles.id', '=', id)
       .where('vehicles.deleted_at', 'is', null)
       .executeTakeFirst();
@@ -98,9 +104,11 @@ export class KyselyVehicleRepository implements VehicleRepository {
   async findByChassisNumber(chassisNumber: string): Promise<Vehicle | null> {
     const row = await this.db
       .selectFrom('vehicles')
-      .selectAll()
-      .where('chassis_number', '=', chassisNumber)
-      .where('deleted_at', 'is', null)
+      .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .selectAll('vehicles')
+      .select('vehicle_models.brand_id as brand_id')
+      .where('vehicles.chassis_number', '=', chassisNumber)
+      .where('vehicles.deleted_at', 'is', null)
       .executeTakeFirst();
 
     return row === undefined ? null : mapVehicle(row);
@@ -127,8 +135,8 @@ export class KyselyVehicleRepository implements VehicleRepository {
   ): Promise<PaginatedResult<VehicleWithDetails>> {
     let base = this.db
       .selectFrom('vehicles')
-      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicles.brand_id')
       .innerJoin('vehicle_models', 'vehicle_models.id', 'vehicles.model_id')
+      .innerJoin('vehicle_brands', 'vehicle_brands.id', 'vehicle_models.brand_id')
       .where('vehicles.deleted_at', 'is', null);
 
     if (filters.search !== undefined && filters.search.trim().length > 0) {
@@ -150,7 +158,7 @@ export class KyselyVehicleRepository implements VehicleRepository {
     }
 
     if (filters.brandId !== undefined) {
-      base = base.where('vehicles.brand_id', '=', filters.brandId);
+      base = base.where('vehicle_models.brand_id', '=', filters.brandId);
     }
     if (filters.modelId !== undefined) {
       base = base.where('vehicles.model_id', '=', filters.modelId);
@@ -177,7 +185,11 @@ export class KyselyVehicleRepository implements VehicleRepository {
 
     const rows = await base
       .selectAll('vehicles')
-      .select(['vehicle_brands.name as brand_name', 'vehicle_models.name as model_name'])
+      .select([
+        'vehicle_models.brand_id as brand_id',
+        'vehicle_brands.name as brand_name',
+        'vehicle_models.name as model_name',
+      ])
       .orderBy('vehicles.created_at', 'desc')
       .limit(page.pageSize)
       .offset(toOffset(page))
@@ -218,7 +230,6 @@ export class KyselyVehicleRepository implements VehicleRepository {
     const row = await this.db
       .insertInto('vehicles')
       .values({
-        brand_id: data.brandId,
         model_id: data.modelId,
         year: data.year,
         chassis_number: data.chassisNumber,
@@ -232,15 +243,14 @@ export class KyselyVehicleRepository implements VehicleRepository {
         notes: data.notes,
         is_active: data.isActive,
       })
-      .returningAll()
+      .returning('id')
       .executeTakeFirstOrThrow();
 
-    return mapVehicle(row);
+    return (await this.findById(row.id))!;
   }
 
   async update(id: string, data: VehicleUpdate): Promise<Vehicle | null> {
     const patch = {
-      ...(data.brandId !== undefined ? { brand_id: data.brandId } : {}),
       ...(data.modelId !== undefined ? { model_id: data.modelId } : {}),
       ...(data.year !== undefined ? { year: data.year } : {}),
       ...(data.chassisNumber !== undefined ? { chassis_number: data.chassisNumber } : {}),
@@ -265,10 +275,10 @@ export class KyselyVehicleRepository implements VehicleRepository {
       .set(patch)
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
-      .returningAll()
+      .returning('id')
       .executeTakeFirst();
 
-    return row === undefined ? null : mapVehicle(row);
+    return row === undefined ? null : this.findById(row.id);
   }
 
   async updateStatus(id: string, status: VehicleStatus): Promise<Vehicle | null> {
@@ -277,10 +287,10 @@ export class KyselyVehicleRepository implements VehicleRepository {
       .set({ status })
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
-      .returningAll()
+      .returning('id')
       .executeTakeFirst();
 
-    return row === undefined ? null : mapVehicle(row);
+    return row === undefined ? null : this.findById(row.id);
   }
 
   async softDelete(id: string): Promise<boolean> {
