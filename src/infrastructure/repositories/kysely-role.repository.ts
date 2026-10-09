@@ -122,4 +122,19 @@ export class KyselyRoleRepository implements RoleRepository {
       return { ...mapRole(row), permissions: data.permissions };
     });
   }
+
+  async countAssignedUsers(id: string): Promise<number> {
+    const row = await this.db
+      .selectFrom('users')
+      .select((eb) => eb.fn.countAll<number>().as('total'))
+      .where('role_id', '=', id)
+      .executeTakeFirstOrThrow();
+
+    return Number(row.total);
+  }
+
+  async delete(id: string): Promise<boolean> {
+    const result = await this.db.deleteFrom('roles').where('id', '=', id).executeTakeFirst();
+    return Number(result.numDeletedRows) > 0;
+  }
 }

@@ -3,7 +3,7 @@ import type { RoleRepository } from '../../../domain/users/role.entity';
 import type { TokenService } from '../../../domain/users/token-service';
 import { authMiddleware } from '../../middlewares/auth.middleware';
 import { asyncHandler } from '../../middlewares/async-handler';
-import { requirePermission } from '../../middlewares/rbac.middleware';
+import { requirePermission, requireRole } from '../../middlewares/rbac.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { uuidParam } from '../shared/common.schemas';
 import type { UsersController } from './users.controller';
@@ -80,6 +80,13 @@ export function buildUsersRoutes(controller: UsersController): Router {
     requirePermission('users:write'),
     validate({ params: uuidParam(), body: updateRoleSchema }),
     asyncHandler(controller.updateRole),
+  );
+
+  router.delete(
+    '/roles/:id',
+    requireRole('admin'),
+    validate({ params: uuidParam() }),
+    asyncHandler(controller.deleteRole),
   );
 
   router.get('/sessions', requirePermission('users:read'), asyncHandler(controller.allSessions));

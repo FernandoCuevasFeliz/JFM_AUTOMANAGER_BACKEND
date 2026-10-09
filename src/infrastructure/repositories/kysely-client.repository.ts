@@ -1,5 +1,4 @@
 import type { Selectable } from 'kysely';
-import { sql } from 'kysely';
 import type {
   Client,
   ClientUpdate,
@@ -190,39 +189,14 @@ export class KyselyClientRepository implements ClientRepository {
     return row === undefined ? null : mapClient(row);
   }
 
-  async softDelete(id: string): Promise<boolean> {
+  async deactivate(id: string): Promise<boolean> {
     const result = await this.db
       .updateTable('clients')
-      .set({ deleted_at: sql<Date>`now()`, is_active: false })
+      .set({ is_active: false, updated_at: new Date() })
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
 
     return Number(result.numUpdatedRows) > 0;
-  }
-
-  async countCommercialRecords(clientId: string): Promise<number> {
-    const [quotations, reservations, sales] = await Promise.all([
-      this.db
-        .selectFrom('quotations')
-        .select((eb) => eb.fn.countAll<number>().as('total'))
-        .where('client_id', '=', clientId)
-        .where('deleted_at', 'is', null)
-        .executeTakeFirstOrThrow(),
-      this.db
-        .selectFrom('reservations')
-        .select((eb) => eb.fn.countAll<number>().as('total'))
-        .where('client_id', '=', clientId)
-        .where('deleted_at', 'is', null)
-        .executeTakeFirstOrThrow(),
-      this.db
-        .selectFrom('sales')
-        .select((eb) => eb.fn.countAll<number>().as('total'))
-        .where('client_id', '=', clientId)
-        .where('deleted_at', 'is', null)
-        .executeTakeFirstOrThrow(),
-    ]);
-
-    return Number(quotations.total) + Number(reservations.total) + Number(sales.total);
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CreateRoleUseCase } from '../../src/application/users/create-role.use-case';
+import { DeleteRoleUseCase } from '../../src/application/users/delete-role.use-case';
 import { UpdateRoleUseCase } from '../../src/application/users/update-role.use-case';
 import {
   ListAllActiveSessionsUseCase,
@@ -38,6 +39,15 @@ class InMemoryRoles implements RoleRepository {
     const updated = { ...this.roles[index], ...data, updatedAt: new Date('2026-10-05T00:00:00Z') };
     this.roles[index] = updated;
     return updated;
+  }
+
+  assignedUsers = new Map<string, number>();
+  async countAssignedUsers(id: string): Promise<number> { return this.assignedUsers.get(id) ?? 0; }
+  async delete(id: string): Promise<boolean> {
+    const index = this.roles.findIndex((role) => role.id === id);
+    if (index < 0) return false;
+    this.roles.splice(index, 1);
+    return true;
   }
 }
 
@@ -104,6 +114,39 @@ describe('UpdateRoleUseCase', () => {
     if (!result.ok) return;
     expect(result.value.name).toBe('supervisor_ventas');
     expect(result.value.permissions).toEqual(['sales:read', 'sales:write']);
+  });
+});
+
+describe('DeleteRoleUseCase', () => {
+  it('elimina un rol sin usuarios asignados', async () => {
+    const repository = new InMemoryRoles();
+    const admin = await repository.create({ name: 'admin', description: null, permissions: ['users:write'] });
+    const sales = await repository.create({ name: 'ventas', description: null, permissions: ['sales:read'] });
+    const users = new FakeUserRepository([makeUserWithRole({ id: 'admin-1', roleId: admin.id })]);
+
+    const result = await new DeleteRoleUseCase(repository, users).execute({
+      roleId: sales.id,
+      actorUserId: 'admin-1',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await repository.findById(sales.id)).toBeNull();
+  });
+
+  it('protege el rol propio y los roles asignados', async () => {
+    const repository = new InMemoryRoles();
+    const admin = await repository.create({ name: 'admin', description: null, permissions: ['users:write'] });
+    const sales = await repository.create({ name: 'ventas', description: null, permissions: ['sales:read'] });
+    repository.assignedUsers.set(sales.id, 2);
+    const users = new FakeUserRepository([makeUserWithRole({ id: 'admin-1', roleId: admin.id })]);
+    const useCase = new DeleteRoleUseCase(repository, users);
+
+    const ownResult = await useCase.execute({ roleId: admin.id, actorUserId: 'admin-1' });
+    const assignedResult = await useCase.execute({ roleId: sales.id, actorUserId: 'admin-1' });
+
+    expect(ownResult.ok).toBe(false);
+    expect(assignedResult.ok).toBe(false);
+    expect(repository.roles).toHaveLength(2);
   });
 });
 

@@ -174,6 +174,8 @@ export class FakeRoleRepository implements RoleRepository {
   async listActive(): Promise<Role[]> { return []; }
   async listActiveWithPermissions(): Promise<RoleWithPermissions[]> { return []; }
   async permissionsForRoleId(): Promise<readonly Permission[]> { return this.permissions; }
+  async countAssignedUsers(): Promise<number> { return 0; }
+  async delete(): Promise<boolean> { return false; }
     async create(_data: NewRole): Promise<RoleWithPermissions> {
       throw new Error('no usado en estos tests');
     }

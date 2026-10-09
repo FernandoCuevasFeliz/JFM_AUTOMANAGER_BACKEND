@@ -26,12 +26,6 @@ export class InvalidClientIdentityError extends BusinessRuleError {
   }
 }
 
-export class ClientHasCommercialHistoryError extends BusinessRuleError {
-  constructor(clientId: string, reason: string) {
-    super(`No se puede eliminar el cliente: ${reason}`, { clientId });
-  }
-}
-
 export class InactiveClientError extends BusinessRuleError {
   constructor(clientId: string) {
     super('El cliente esta inactivo y no puede participar en operaciones comerciales', {

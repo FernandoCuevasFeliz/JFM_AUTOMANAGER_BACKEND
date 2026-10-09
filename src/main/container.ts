@@ -80,6 +80,7 @@ import { ListSuppliersUseCase } from '../application/suppliers/list-suppliers.us
 import { UpdateSupplierUseCase } from '../application/suppliers/update-supplier.use-case';
 import { AuthenticateUserUseCase } from '../application/users/authenticate-user.use-case';
 import { CreateRoleUseCase } from '../application/users/create-role.use-case';
+import { DeleteRoleUseCase } from '../application/users/delete-role.use-case';
 import { UpdateRoleUseCase } from '../application/users/update-role.use-case';
 import { ChangePasswordUseCase } from '../application/users/change-password.use-case';
 import { SessionIssuer } from '../application/users/issue-session';
@@ -272,6 +273,11 @@ export function buildContainer(): Container {
     updateRole: withAudit(
       new UpdateRoleUseCase(roles, users),
       { table: 'roles', action: 'update', recordIdFromInput: (input) => input.roleId },
+      audit,
+    ),
+    deleteRole: withAudit(
+      new DeleteRoleUseCase(roles, users),
+      { table: 'roles', action: 'delete', recordIdFromInput: (input) => input.roleId },
       audit,
     ),
     createUser: withAudit(

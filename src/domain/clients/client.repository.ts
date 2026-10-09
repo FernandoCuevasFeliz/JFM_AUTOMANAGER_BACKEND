@@ -20,7 +20,5 @@ export interface ClientRepository {
   list(filters: ClientFilters, page: PageQuery): Promise<PaginatedResult<ClientWithDetails>>;
   create(data: NewClient): Promise<Client>;
   update(id: string, data: ClientUpdate): Promise<Client | null>;
-  softDelete(id: string): Promise<boolean>;
-  /** Cotizaciones, reservas o ventas asociadas; bloquea el borrado logico. */
-  countCommercialRecords(clientId: string): Promise<number>;
+  deactivate(id: string): Promise<boolean>;
 }

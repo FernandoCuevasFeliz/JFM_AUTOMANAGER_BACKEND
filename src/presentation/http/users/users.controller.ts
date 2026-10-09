@@ -5,6 +5,7 @@ import type { AuthenticateUserUseCase } from '../../../application/users/authent
 import type { ChangePasswordUseCase } from '../../../application/users/change-password.use-case';
 import type { CreateUserUseCase } from '../../../application/users/create-user.use-case';
 import type { CreateRoleUseCase } from '../../../application/users/create-role.use-case';
+import type { DeleteRoleUseCase } from '../../../application/users/delete-role.use-case';
 import type { UpdateRoleUseCase } from '../../../application/users/update-role.use-case';
 import type { DeleteUserUseCase } from '../../../application/users/delete-user.use-case';
 import type { GetUserUseCase } from '../../../application/users/get-user.use-case';
@@ -58,6 +59,7 @@ export interface UsersControllerDeps {
   readonly listRoles: UseCaseOf<ListRolesUseCase>;
   readonly createRole: UseCaseOf<CreateRoleUseCase>;
   readonly updateRole: UseCaseOf<UpdateRoleUseCase>;
+  readonly deleteRole: UseCaseOf<DeleteRoleUseCase>;
   readonly refreshSession: UseCaseOf<RefreshSessionUseCase>;
   readonly logout: UseCaseOf<LogoutUseCase>;
   readonly listActiveSessions: UseCaseOf<ListActiveSessionsUseCase>;
@@ -193,6 +195,14 @@ export class UsersController {
       ...body,
     });
     sendResult(res, next, result);
+  };
+
+  deleteRole = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const result = await this.deps.deleteRole.execute({
+      roleId: req.params.id as string,
+      actorUserId: requireActorId(req),
+    });
+    sendResult(res, next, result, 204);
   };
 
   permissions = (_req: Request, res: Response): void => {

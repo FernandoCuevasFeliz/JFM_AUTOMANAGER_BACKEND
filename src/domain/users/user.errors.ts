@@ -52,6 +52,21 @@ export class CannotEditOwnRoleError extends BusinessRuleError {
   }
 }
 
+export class CannotDeleteOwnRoleError extends BusinessRuleError {
+  constructor() {
+    super('No puedes eliminar el rol asignado a tu propia cuenta');
+  }
+}
+
+export class RoleHasAssignedUsersError extends BusinessRuleError {
+  constructor(roleId: string, assignedUsers: number) {
+    super(
+      `No se puede eliminar el rol porque esta asignado a ${assignedUsers} usuario(s). Cambie sus roles primero`,
+      { roleId, assignedUsers },
+    );
+  }
+}
+
 export class SamePasswordError extends BusinessRuleError {
   constructor() {
     super('La nueva contrasena debe ser distinta de la actual');

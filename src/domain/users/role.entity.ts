@@ -29,4 +29,6 @@ export interface RoleRepository {
   permissionsForRoleId(roleId: string): Promise<readonly Permission[]>;
   create(data: NewRole): Promise<RoleWithPermissions>;
   update(id: string, data: RoleUpdate): Promise<RoleWithPermissions | null>;
+  countAssignedUsers(id: string): Promise<number>;
+  delete(id: string): Promise<boolean>;
 }
