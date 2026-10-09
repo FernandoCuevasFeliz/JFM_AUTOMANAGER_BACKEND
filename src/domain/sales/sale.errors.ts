@@ -176,23 +176,6 @@ export class LastSaleItemError extends BusinessRuleError {
   }
 }
 
-/**
- * Bloqueo fiscal de la devolucion.
- *
- * Con una factura EMITIDA, el importe de la unidad ya existe ante la DGII. Sacar
- * la linea del total sin acreditarla dejaria la venta y el comprobante diciendo
- * cosas distintas del mismo dinero. Primero la nota de credito por el importe de
- * la linea, despues la devolucion.
- */
-export class SaleItemNotCreditedError extends BusinessRuleError {
-  constructor(saleItemId: string, itemAmount: number, creditedAmount: number) {
-    super(
-      `El vehiculo esta facturado: emita primero una nota de credito por su importe (${itemAmount.toFixed(2)}; acreditado hasta ahora ${creditedAmount.toFixed(2)})`,
-      { saleItemId, itemAmount, creditedAmount },
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Reembolsos
 // ---------------------------------------------------------------------------

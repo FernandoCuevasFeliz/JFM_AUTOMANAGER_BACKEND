@@ -1,11 +1,8 @@
 import type { ExpenseScope } from '../expenses/expense.entity';
-import type { FiscalDocStatus, NcfType } from '../invoices/invoice.entity';
 import type { PageQuery, PaginatedResult } from '../shared/pagination';
 import type { VehicleStatus } from '../vehicles/vehicle.entity';
 import type {
   AccountReceivable,
-  FiscalDocumentKind,
-  FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
   MonthlyReturnsReportRow,
@@ -67,15 +64,6 @@ export interface MonthlyExpensesFilters extends MonthlyRangeFilters {
   readonly scope?: ExpenseScope;
 }
 
-export interface FiscalDocumentsFilters {
-  readonly dateFrom?: string;
-  readonly dateTo?: string;
-  readonly documentKind?: FiscalDocumentKind;
-  readonly ncfType?: NcfType;
-  readonly status?: FiscalDocStatus;
-  readonly currencyCode?: string;
-}
-
 export interface ReportRepository {
   /**
    * Una fila por vehiculo: costo real contra precio de venta.
@@ -101,8 +89,6 @@ export interface ReportRepository {
   /** Devoluciones parciales por mes; el mes es el de la devolucion, no el de la venta. */
   monthlyReturns(filters: MonthlyRangeFilters): Promise<MonthlyReturnsReportRow[]>;
   monthlyExpenses(filters: MonthlyExpensesFilters): Promise<MonthlyExpensesReportRow[]>;
-  fiscalDocuments(filters: FiscalDocumentsFilters): Promise<FiscalDocumentsReportRow[]>;
-
   /** Siempre devuelve todos los estados, incluidos los que estan en cero. */
   inventoryStatus(): Promise<InventoryStatusRow[]>;
 }

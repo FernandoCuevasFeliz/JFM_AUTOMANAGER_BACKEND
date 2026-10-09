@@ -4,7 +4,6 @@ import { RemoveSaleItemUseCase } from '../../src/application/sales/remove-sale-i
 import { ReturnSaleItemUseCase } from '../../src/application/sales/return-sale-item.use-case';
 import { UpdateSaleItemUseCase } from '../../src/application/sales/update-sale-item.use-case';
 import type { CatalogRepository, Currency } from '../../src/domain/catalogs/catalog.entity';
-import type { InvoiceRepository } from '../../src/domain/invoices/invoice.repository';
 import {
   netPaid,
   type Sale,
@@ -21,8 +20,7 @@ import { FixedClock } from '../helpers/fake-auth';
  *
  * Lo que se fija aqui son las reglas que antes no podian existir: que el total
  * de la venta se derive de las lineas vigentes, que devolver una unidad no
- * toque el resto de la venta, que la unidad facturada no salga sin nota de
- * credito y que no se pueda reembolsar mas de lo cobrado.
+ * toque el resto de la venta y que no se pueda reembolsar mas de lo cobrado.
  */
 
 const HOY = new Date('2026-03-10T12:00:00Z');
@@ -65,8 +63,6 @@ function montar(opciones: {
   sale: Sale;
   paid?: number;
   refunded?: number;
-  invoiceStatus?: 'pending' | 'issued' | null;
-  creditedPorLinea?: Record<string, number>;
 }) {
   const escrituras: Escrituras = {
     devueltas: [], quitadas: [], precios: [], vehiculos: [], reembolsos: [],
@@ -111,14 +107,6 @@ function montar(opciones: {
     run: async <T, E>(work: (c: TransactionalContext) => Promise<Result<T, E>>) => work(ctx),
   };
 
-  const invoices = {
-    findBySaleId: async () =>
-      opciones.invoiceStatus == null
-        ? null
-        : { id: 'inv-1', saleId: 'sale-1', status: opciones.invoiceStatus },
-    creditedAmountForSaleItem: async (id: string) => opciones.creditedPorLinea?.[id] ?? 0,
-  } as unknown as InvoiceRepository;
-
   const catalog = {
     findCurrencyById: async (id: string) => (id === DOP.id ? DOP : null),
     findPaymentMethodById: async () => ({ id: 'pm-1', name: 'Efectivo', isActive: true }),
@@ -127,7 +115,7 @@ function montar(opciones: {
   return {
     escrituras,
     sales: salesFake as unknown as SaleRepository,
-    devolver: new ReturnSaleItemUseCase(unitOfWork, salesFake as unknown as SaleRepository, invoices, new FixedClock(HOY)),
+    devolver: new ReturnSaleItemUseCase(unitOfWork, salesFake as unknown as SaleRepository, new FixedClock(HOY)),
     quitar: new RemoveSaleItemUseCase(unitOfWork, salesFake as unknown as SaleRepository),
     cambiarPrecio: new UpdateSaleItemUseCase(salesFake as unknown as SaleRepository),
     reembolsar: new RegisterRefundUseCase(unitOfWork, catalog),
@@ -209,43 +197,6 @@ describe('ReturnSaleItemUseCase', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('BLOQUEO FISCAL: con factura emitida y sin nota de credito, no sale el vehiculo', async () => {
-    const m = montar({ sale: makeSale(dosLineas()), invoiceStatus: 'issued' });
-
-    const result = await m.devolver.execute({
-      saleId: 'sale-1', saleItemId: 'item-1', reason: 'Devolucion', destination: 'in_inventory',
-    });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.message).toContain('nota de credito');
-    expect(m.escrituras.devueltas).toEqual([]);
-  });
-
-  it('con la nota de credito emitida por el importe de la linea, si sale', async () => {
-    const m = montar({
-      sale: makeSale(dosLineas()),
-      invoiceStatus: 'issued',
-      creditedPorLinea: { 'item-1': 1_000_000 },
-    });
-
-    const result = await m.devolver.execute({
-      saleId: 'sale-1', saleItemId: 'item-1', reason: 'Devolucion', destination: 'in_inventory',
-    });
-
-    expect(result.ok).toBe(true);
-    expect(m.escrituras.devueltas).toHaveLength(1);
-  });
-
-  it('una factura pendiente todavia no existe para la DGII y no bloquea', async () => {
-    const m = montar({ sale: makeSale(dosLineas()), invoiceStatus: 'pending' });
-
-    const result = await m.devolver.execute({
-      saleId: 'sale-1', saleItemId: 'item-1', reason: 'Devolucion', destination: 'in_inventory',
-    });
-
-    expect(result.ok).toBe(true);
-  });
 });
 
 describe('RemoveSaleItemUseCase', () => {

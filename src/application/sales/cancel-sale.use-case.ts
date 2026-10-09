@@ -1,5 +1,3 @@
-import { SaleHasActiveInvoiceError } from '../../domain/invoices/invoice.errors';
-import type { InvoiceRepository } from '../../domain/invoices/invoice.repository';
 import { canTransitionSaleTo, type SaleWithDetails } from '../../domain/sales/sale.entity';
 import { InvalidSaleStatusTransitionError, SaleNotFoundError } from '../../domain/sales/sale.errors';
 import type { SaleRepository } from '../../domain/sales/sale.repository';
@@ -30,26 +28,15 @@ const CANCELLATION_REASON = 'Venta cancelada';
  * historial y no bloquea nada: el vehiculo queda disponible de inmediato para
  * venderse de nuevo, sin necesidad de borrarlo.
  *
- * BLOQUEO FISCAL: si la venta tiene un comprobante vivo (pendiente, rechazado o
- * emitido), no se puede cancelar. Un e-CF emitido no desaparece porque el
- * sistema marque la venta como anulada; ante la DGII la operacion sigue
- * existiendo hasta que una nota de credito cubra su importe. Primero se anula
- * el comprobante, despues la venta.
  */
 export class CancelSaleUseCase implements UseCase<CancelSaleInput, SaleWithDetails> {
   constructor(
     private readonly unitOfWork: UnitOfWork,
     private readonly sales: SaleRepository,
-    private readonly invoices: InvoiceRepository,
     private readonly clock: Clock,
   ) {}
 
   async execute(input: CancelSaleInput): Promise<Result<SaleWithDetails, DomainError>> {
-    const invoice = await this.invoices.findBySaleId(input.saleId);
-    if (invoice !== null && invoice.status !== 'cancelled') {
-      return err(new SaleHasActiveInvoiceError(input.saleId, invoice.ncfNumber));
-    }
-
     const result = await this.unitOfWork.run<void, DomainError>(async (trx) => {
       const sale = await trx.sales.findById(input.saleId);
       if (sale === null) {

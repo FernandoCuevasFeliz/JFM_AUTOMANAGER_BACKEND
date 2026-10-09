@@ -1,5 +1,4 @@
 import type { ExpenseScope } from '../expenses/expense.entity';
-import type { FiscalDocStatus, NcfType } from '../invoices/invoice.entity';
 import type { SaleStatus } from '../sales/sale.entity';
 import type { VehicleStatus } from '../vehicles/vehicle.entity';
 
@@ -140,23 +139,4 @@ export interface MonthlyExpensesReportRow {
 export interface InventoryStatusRow {
   readonly status: VehicleStatus;
   readonly vehicleCount: number;
-}
-
-// --- Comprobantes fiscales --------------------------------------------------
-
-export type FiscalDocumentKind = 'invoice' | 'credit_note';
-
-export const FISCAL_DOCUMENT_KINDS: readonly FiscalDocumentKind[] = ['invoice', 'credit_note'];
-
-export interface FiscalDocumentsReportRow {
-  /** Mes de emision; el de registro mientras el comprobante siga sin emitirse. */
-  readonly month: ReportMonth;
-  readonly documentKind: FiscalDocumentKind;
-  /** Las notas de credito son siempre E34. */
-  readonly ncfType: NcfType;
-  readonly status: FiscalDocStatus;
-  readonly currencyCode: string;
-  readonly documentCount: number;
-  readonly totalAmount: number;
-  readonly totalAmountConverted: number;
 }

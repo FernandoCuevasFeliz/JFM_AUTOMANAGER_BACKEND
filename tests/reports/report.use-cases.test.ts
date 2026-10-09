@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { GetAccountsReceivableUseCase } from '../../src/application/reports/get-accounts-receivable.use-case';
-import { GetFiscalDocumentsReportUseCase } from '../../src/application/reports/get-fiscal-documents-report.use-case';
 import { GetInventoryStatusReportUseCase } from '../../src/application/reports/get-inventory-status-report.use-case';
 import { GetMonthlyExpensesReportUseCase } from '../../src/application/reports/get-monthly-expenses-report.use-case';
 import {
@@ -10,7 +9,6 @@ import {
 import { GetVehicleProfitabilityUseCase } from '../../src/application/reports/get-vehicle-profitability.use-case';
 import type {
   AccountReceivable,
-  FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
   MonthlyReturnsReportRow,
@@ -43,7 +41,6 @@ class RecordingReportRepository implements ReportRepository {
       bySalesperson?: SalespersonReportRow[];
       returns?: MonthlyReturnsReportRow[];
       expenses?: MonthlyExpensesReportRow[];
-      fiscal?: FiscalDocumentsReportRow[];
       inventory?: InventoryStatusRow[];
     } = {},
   ) {}
@@ -78,11 +75,6 @@ class RecordingReportRepository implements ReportRepository {
   async monthlyExpenses(filters: unknown) {
     this.lastFilters = filters;
     return this.rows.expenses ?? [];
-  }
-
-  async fiscalDocuments(filters: unknown) {
-    this.lastFilters = filters;
-    return this.rows.fiscal ?? [];
   }
 
   async inventoryStatus() {
@@ -177,21 +169,6 @@ describe('Reportes agregados', () => {
 
     expect(result.ok).toBe(true);
     expect(reports.lastFilters).toEqual({ categoryId: 'cat-1', scope: 'vehicle' });
-  });
-
-  it('comprobantes fiscales: acepta acotar por tipo y estado', async () => {
-    const reports = new RecordingReportRepository();
-
-    const result = await new GetFiscalDocumentsReportUseCase(reports).execute({
-      filters: { ncfType: 'E31', status: 'rejected', documentKind: 'invoice' },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(reports.lastFilters).toEqual({
-      ncfType: 'E31',
-      status: 'rejected',
-      documentKind: 'invoice',
-    });
   });
 
   it('inventario por estado: no recibe filtros y devuelve la foto completa', async () => {

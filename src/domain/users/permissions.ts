@@ -54,11 +54,6 @@ export const PERMISSIONS = [
   'payments:read',
   'payments:write',
 
-  'invoices:read',
-  'invoices:write',
-  'invoices:issue',
-  'credit-notes:write',
-
   'audit:read',
   'reports:read',
 ] as const;

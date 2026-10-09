@@ -1,6 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { GetAccountsReceivableUseCase } from '../../../application/reports/get-accounts-receivable.use-case';
-import type { GetFiscalDocumentsReportUseCase } from '../../../application/reports/get-fiscal-documents-report.use-case';
 import type { GetInventoryStatusReportUseCase } from '../../../application/reports/get-inventory-status-report.use-case';
 import type { GetMonthlyExpensesReportUseCase } from '../../../application/reports/get-monthly-expenses-report.use-case';
 import type {
@@ -14,7 +13,6 @@ import { compact, toPageQuery } from '../shared/common.schemas';
 import { sendPaginated, sendResult } from '../shared/http-response';
 import type {
   AccountsReceivableQuery,
-  FiscalDocumentsQuery,
   MonthlyExpensesQuery,
   MonthlySalesQuery,
   SalesBySalespersonQuery,
@@ -29,7 +27,6 @@ export interface ReportsControllerDeps {
   readonly monthlyReturns: UseCaseOf<GetMonthlyReturnsReportUseCase>;
   readonly monthlyExpenses: UseCaseOf<GetMonthlyExpensesReportUseCase>;
   readonly inventoryStatus: UseCaseOf<GetInventoryStatusReportUseCase>;
-  readonly fiscalDocuments: UseCaseOf<GetFiscalDocumentsReportUseCase>;
 }
 
 /**
@@ -137,18 +134,4 @@ export class ReportsController {
     sendResult(res, next, result);
   };
 
-  fiscalDocuments = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const query = req.query as unknown as FiscalDocumentsQuery;
-    const result = await this.deps.fiscalDocuments.execute({
-      filters: compact({
-        dateFrom: query.dateFrom,
-        dateTo: query.dateTo,
-        currencyCode: query.currency,
-        documentKind: query.documentKind,
-        ncfType: query.ncfType,
-        status: query.status,
-      }),
-    });
-    sendResult(res, next, result);
-  };
 }

@@ -1,7 +1,6 @@
 import { sql } from 'kysely';
 import type {
   AccountReceivable,
-  FiscalDocumentsReportRow,
   InventoryStatusRow,
   MonthlyExpensesReportRow,
   MonthlyReturnsReportRow,
@@ -11,7 +10,6 @@ import type {
 } from '../../domain/reports/report.entity';
 import type {
   AccountsReceivableFilters,
-  FiscalDocumentsFilters,
   MonthlyExpensesFilters,
   MonthlyRangeFilters,
   ReportRepository,
@@ -340,47 +338,6 @@ export class KyselyReportRepository implements ReportRepository {
       scope: row.scope,
       currencyCode: row.currency_code,
       expenseCount: Number(row.expense_count),
-      totalAmount: toNumber(row.total_amount),
-      totalAmountConverted: toNumber(row.total_amount_converted),
-    }));
-  }
-
-  async fiscalDocuments(filters: FiscalDocumentsFilters): Promise<FiscalDocumentsReportRow[]> {
-    let query = this.db.selectFrom('vw_fiscal_documents_summary').selectAll();
-
-    if (filters.dateFrom !== undefined) {
-      query = query.where('month', '>=', monthStart(filters.dateFrom));
-    }
-    if (filters.dateTo !== undefined) {
-      query = query.where('month', '<=', monthStart(filters.dateTo));
-    }
-    if (filters.documentKind !== undefined) {
-      query = query.where('document_kind', '=', filters.documentKind);
-    }
-    if (filters.ncfType !== undefined) {
-      query = query.where('ncf_type', '=', filters.ncfType);
-    }
-    if (filters.status !== undefined) {
-      query = query.where('status', '=', filters.status);
-    }
-    if (filters.currencyCode !== undefined) {
-      query = query.where('currency_code', '=', normalizeCurrency(filters.currencyCode));
-    }
-
-    const rows = await query
-      .orderBy('month', 'desc')
-      .orderBy('document_kind', 'asc')
-      .orderBy('ncf_type', 'asc')
-      .orderBy('status', 'asc')
-      .execute();
-
-    return rows.map((row) => ({
-      month: row.month,
-      documentKind: row.document_kind,
-      ncfType: row.ncf_type,
-      status: row.status,
-      currencyCode: row.currency_code,
-      documentCount: Number(row.document_count),
       totalAmount: toNumber(row.total_amount),
       totalAmountConverted: toNumber(row.total_amount_converted),
     }));

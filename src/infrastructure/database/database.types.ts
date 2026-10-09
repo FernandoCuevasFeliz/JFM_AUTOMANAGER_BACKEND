@@ -61,10 +61,6 @@ export type SaleItemStatusEnum = 'active' | 'returned';
 export type ExpenseScopeEnum = 'general' | 'vehicle';
 export type AuditActionEnum = 'insert' | 'update' | 'delete';
 
-/** Tipos de e-CF de la DGII (Ley 32-23). */
-export type NcfTypeEnum = 'E31' | 'E32' | 'E34' | 'E44' | 'E45';
-export type FiscalDocStatusEnum = 'pending' | 'issued' | 'rejected' | 'cancelled';
-
 // --- 1. Catalogos -----------------------------------------------------------
 
 export interface RolesTable {
@@ -394,41 +390,6 @@ export interface RefundsTable {
   updated_at: GeneratedTimestamp;
 }
 
-// --- 8. Facturacion electronica (e-CF) -------------------------------------
-
-export interface InvoicesTable {
-  id: Generated<string>;
-  sale_id: string;
-  ncf_type: NcfTypeEnum;
-  /** NULL hasta que la DGII acepta el comprobante. */
-  ncf_number: string | null;
-  status: Generated<FiscalDocStatusEnum>;
-  issued_at: Timestamp | null;
-  dgii_track_id: string | null;
-  xml_url: string | null;
-  rejection_reason: string | null;
-  created_by: string;
-  created_at: GeneratedTimestamp;
-  updated_at: GeneratedTimestamp;
-}
-
-export interface CreditNotesTable {
-  id: Generated<string>;
-  invoice_id: string;
-  /** Vehiculo devuelto que la motiva; NULL = nota sobre el total de la factura. */
-  sale_item_id: string | null;
-  ncf_number: string | null;
-  reason: string;
-  amount: Numeric;
-  status: Generated<FiscalDocStatusEnum>;
-  issued_at: Timestamp | null;
-  dgii_track_id: string | null;
-  xml_url: string | null;
-  created_by: string;
-  created_at: GeneratedTimestamp;
-  updated_at: GeneratedTimestamp;
-}
-
 // --- 9. Vistas de reporte (solo lectura) ------------------------------------
 
 /**
@@ -545,30 +506,15 @@ export interface VwInventoryStatusSummaryTable {
   vehicle_count: number;
 }
 
-export type FiscalDocumentKind = 'invoice' | 'credit_note';
-
-export interface VwFiscalDocumentsSummaryTable {
-  month: string;
-  document_kind: FiscalDocumentKind;
-  ncf_type: NcfTypeEnum;
-  status: FiscalDocStatusEnum;
-  currency_code: string;
-  document_count: number;
-  total_amount: number;
-  total_amount_converted: number;
-}
-
 // --- Mapa de la base de datos ----------------------------------------------
 
 export interface DB {
   audit_logs: AuditLogsTable;
   clients: ClientsTable;
-  credit_notes: CreditNotesTable;
   currencies: CurrenciesTable;
   document_types: DocumentTypesTable;
   expense_categories: ExpenseCategoriesTable;
   expenses: ExpensesTable;
-  invoices: InvoicesTable;
   payment_methods: PaymentMethodsTable;
   purchase_items: PurchaseItemsTable;
   purchases: PurchasesTable;
@@ -591,7 +537,6 @@ export interface DB {
   // Vistas de reporte (migraciones 007 y 008). Solo lectura.
   vw_accounts_receivable: VwAccountsReceivableTable;
   vw_expenses_summary_monthly: VwExpensesSummaryMonthlyTable;
-  vw_fiscal_documents_summary: VwFiscalDocumentsSummaryTable;
   vw_inventory_status_summary: VwInventoryStatusSummaryTable;
   vw_returns_summary_monthly: VwReturnsSummaryMonthlyTable;
   vw_sales_by_salesperson: VwSalesBySalespersonTable;

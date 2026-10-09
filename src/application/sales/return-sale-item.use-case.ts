@@ -1,4 +1,3 @@
-import type { InvoiceRepository } from '../../domain/invoices/invoice.repository';
 import {
   acceptsReturns,
   isItemActive,
@@ -8,7 +7,6 @@ import {
   SaleDoesNotAcceptReturnsError,
   SaleItemAlreadyReturnedError,
   SaleItemDoesNotBelongToSaleError,
-  SaleItemNotCreditedError,
   SaleItemNotFoundError,
   SaleNotFoundError,
 } from '../../domain/sales/sale.errors';
@@ -43,13 +41,6 @@ export interface ReturnSaleItemInput {
  * importe historico. Ese es el motivo de que el precio viva en la linea y no en
  * la cabecera.
  *
- * BLOQUEO FISCAL: si la venta tiene una factura EMITIDA, el importe de esta
- * unidad ya existe ante la DGII. Sacarla del total sin acreditarla dejaria la
- * venta y el comprobante contando dinero distinto, asi que primero hay que
- * emitir una nota de credito por el importe de la linea
- * (`POST /invoices/:id/credit-notes` con `saleItemId`) y despues devolver. Una
- * factura `pending` o `rejected` todavia no existe para la DGII y no bloquea.
- *
  * El reembolso del dinero NO ocurre aqui: es un acto de caja aparte, con su
  * propia fecha, metodo y tasa (`POST /sales/:id/refunds`). Devolver el vehiculo
  * y devolver el dinero son dos hechos distintos y pueden no coincidir en el
@@ -59,7 +50,6 @@ export class ReturnSaleItemUseCase implements UseCase<ReturnSaleItemInput, SaleW
   constructor(
     private readonly unitOfWork: UnitOfWork,
     private readonly sales: SaleRepository,
-    private readonly invoices: InvoiceRepository,
     private readonly clock: Clock,
   ) {}
 
@@ -84,14 +74,6 @@ export class ReturnSaleItemUseCase implements UseCase<ReturnSaleItemInput, SaleW
       }
       if (!isItemActive(item)) {
         return err(new SaleItemAlreadyReturnedError(input.saleItemId));
-      }
-
-      const invoice = await this.invoices.findBySaleId(input.saleId);
-      if (invoice !== null && invoice.status === 'issued') {
-        const credited = await this.invoices.creditedAmountForSaleItem(input.saleItemId);
-        if (credited + 0.01 < item.salePrice) {
-          return err(new SaleItemNotCreditedError(input.saleItemId, item.salePrice, credited));
-        }
       }
 
       await trx.sales.returnItem(input.saleItemId, {

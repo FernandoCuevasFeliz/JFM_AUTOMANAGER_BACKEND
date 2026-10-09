@@ -296,7 +296,7 @@ export class KyselySaleRepository implements SaleRepository {
 
   async summary(filters: SaleFilters): Promise<SalesSummary> {
     /*
-     * Una venta anulada no es facturacion, ni cobro, ni cartera.
+     * Una venta anulada no cuenta como ingreso, cobro ni cartera.
      *
      * El resumen alimenta las tarjetas del tablero, que se piden sin filtro de
      * estado. Contando las canceladas, una venta caida seguia sumando su
@@ -458,7 +458,7 @@ export class KyselySaleRepository implements SaleRepository {
   /**
    * Borrado FISICO, y es correcto que lo sea: solo se llega aqui corrigiendo una
    * linea agregada por error a una venta todavia en proceso. Una linea que llego
-   * a tener efecto —cobrada, facturada o entregada— se devuelve, no se quita.
+   * a tener efecto —cobrada o entregada— se devuelve, no se quita.
    */
   async removeItem(saleItemId: string): Promise<boolean> {
     const result = await this.db

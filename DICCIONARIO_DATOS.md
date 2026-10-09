@@ -7,7 +7,7 @@ Este documento describe el esquema PostgreSQL de **JFM AutoManager** utilizado p
 Se excluyen deliberadamente:
 
 - Las tablas internas de control de migraciones.
-- Las tablas y vistas del modulo de facturacion electronica.
+- El esquema ya no incluye un modulo de facturacion electronica.
 
 ### Leyenda
 

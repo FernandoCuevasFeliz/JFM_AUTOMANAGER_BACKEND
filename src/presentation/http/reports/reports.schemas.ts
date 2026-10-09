@@ -1,24 +1,10 @@
 import { z } from 'zod';
-import { FISCAL_DOC_STATUSES, NCF_TYPES } from '../../../domain/invoices/invoice.entity';
-import { FISCAL_DOCUMENT_KINDS } from '../../../domain/reports/report.entity';
 import { VEHICLE_STATUSES } from '../../../domain/vehicles/vehicle.entity';
 import { booleanQuery, dateOnly, paginationQuery, uuid } from '../shared/common.schemas';
 
 const vehicleStatus = z.enum(
   VEHICLE_STATUSES as unknown as [string, ...string[]],
 ) as z.ZodType<(typeof VEHICLE_STATUSES)[number]>;
-
-const ncfType = z.enum(NCF_TYPES as unknown as [string, ...string[]]) as z.ZodType<
-  (typeof NCF_TYPES)[number]
->;
-
-const fiscalStatus = z.enum(
-  FISCAL_DOC_STATUSES as unknown as [string, ...string[]],
-) as z.ZodType<(typeof FISCAL_DOC_STATUSES)[number]>;
-
-const documentKind = z.enum(
-  FISCAL_DOCUMENT_KINDS as unknown as [string, ...string[]],
-) as z.ZodType<(typeof FISCAL_DOCUMENT_KINDS)[number]>;
 
 const expenseScope = z.enum(['general', 'vehicle']);
 
@@ -73,18 +59,8 @@ export const monthlyExpensesQuerySchema = z.object({
   scope: expenseScope.optional(),
 });
 
-export const fiscalDocumentsQuerySchema = z.object({
-  dateFrom: dateOnly.optional(),
-  dateTo: dateOnly.optional(),
-  currency: currencyCode.optional(),
-  documentKind: documentKind.optional(),
-  ncfType: ncfType.optional(),
-  status: fiscalStatus.optional(),
-});
-
 export type VehicleProfitabilityQuery = z.infer<typeof vehicleProfitabilityQuerySchema>;
 export type AccountsReceivableQuery = z.infer<typeof accountsReceivableQuerySchema>;
 export type MonthlySalesQuery = z.infer<typeof monthlySalesQuerySchema>;
 export type SalesBySalespersonQuery = z.infer<typeof salesBySalespersonQuerySchema>;
 export type MonthlyExpensesQuery = z.infer<typeof monthlyExpensesQuerySchema>;
-export type FiscalDocumentsQuery = z.infer<typeof fiscalDocumentsQuerySchema>;

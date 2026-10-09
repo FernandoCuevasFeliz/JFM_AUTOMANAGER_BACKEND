@@ -5,7 +5,6 @@ import { validate } from '../../middlewares/validate.middleware';
 import type { ReportsController } from './reports.controller';
 import {
   accountsReceivableQuerySchema,
-  fiscalDocumentsQuerySchema,
   monthlyExpensesQuerySchema,
   monthlySalesQuerySchema,
   salesBySalespersonQuerySchema,
@@ -76,13 +75,6 @@ export function buildReportsRoutes(controller: ReportsController): Router {
     '/inventory-status',
     requirePermission('reports:read'),
     asyncHandler(controller.inventoryStatus),
-  );
-
-  router.get(
-    '/fiscal-documents',
-    requirePermission('reports:read'),
-    validate({ query: fiscalDocumentsQuerySchema }),
-    asyncHandler(controller.fiscalDocuments),
   );
 
   return router;

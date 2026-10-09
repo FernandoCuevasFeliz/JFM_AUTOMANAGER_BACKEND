@@ -26,7 +26,7 @@ export interface GetSalesSummaryInput {
   readonly filters: SaleFilters;
 }
 
-/** Totales de ventas del periodo: facturado, cobrado y por cobrar. */
+/** Totales de ventas del periodo: vendido, cobrado y por cobrar. */
 export class GetSalesSummaryUseCase implements UseCase<GetSalesSummaryInput, SalesSummary> {
   constructor(private readonly sales: SaleRepository) {}
 
